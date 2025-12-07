@@ -1,0 +1,12 @@
+temporal:
+  target_host: 'TEMPORAL_HOST'
+  namespace: "TEMPORAL_NAMESPACE"
+  tls: "TEMPORAL_USE_TLS"
+  api_key: 'TEMPORAL_KEY'
+
+gemini:
+  api_key: 'GEMINI_API_KEY'
+  model_name: "GEMINI_MODEL_NAME"
+
+llm:
+  anthropic_api_key: 'ANTHROPIC_API_KEY'
