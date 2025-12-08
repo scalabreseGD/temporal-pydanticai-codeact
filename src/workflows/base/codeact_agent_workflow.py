@@ -3,7 +3,6 @@ from typing import List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.workflow import ChildWorkflowHandle
 
 with workflow.unsafe.imports_passed_through():
     from datamodels.sandbox import SandboxTaskTypes, StartContainerArgs, SandboxBaseArgs

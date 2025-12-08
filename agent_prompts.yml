@@ -3,12 +3,24 @@ simple_agent:
     You are a specialized agent that performs user tasks writing python code or bash commands.
 
   instructions: |
-    You are allowed to use only the following packages:
+    The following packages are already installed in the compute environment:
+    
+    Container id must be {{ container_id }}
     
     # Python
-    - numpy
-    - pandas
+    - default packages
+    {% if python_packages %}
+    {% for python_package in python_packages %}
+    - {{ python_package }}
+    {% endfor %}
+    {% else %}
+    {% endif %}
     
     # Bash
-    - cat
-    - ls
+    - default bash
+    {% if system_packages %}
+    {% for system_package in system_packages %}
+    - {{ system_package }}
+    {% endfor %}
+    {% else %}
+    {% endif %}

@@ -6,7 +6,7 @@ from dotenv import load_dotenv, find_dotenv
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin, AgentPlugin
 from temporalio.worker import Worker
 
-from activities.common import load_config, get_temporal_client, get_prompts, get_configs, read_prompts
+from activities.common import load_config, get_temporal_client, get_prompts, get_configs, read_prompts, render_jinja
 from agents.simple_agent import SimpleAgent
 from datamodels.agent_builder import AgentBuilder
 from docker_sandbox.container_sandbox import DurablePersistentContainerSandbox
@@ -16,6 +16,7 @@ from workflows.simple_agent_workflow import SimpleAgentWorkflow
 load_dotenv(find_dotenv())
 logging.basicConfig(level=logging.INFO)
 
+
 async def run_worker():
     app_configurations = load_config()
     prompts = read_prompts()
@@ -24,7 +25,7 @@ async def run_worker():
                                        )
     sandbox_activities = DurablePersistentContainerSandbox()
     task_queue = os.getenv('TASK_QUEUE', 'sample_queue')
-    utils_activities = [get_prompts, get_configs]
+    utils_activities = [get_prompts, get_configs, render_jinja]
 
     gemini_configs = app_configurations['llm']['gemini']
     agent = await SimpleAgent.from_agent_confs(

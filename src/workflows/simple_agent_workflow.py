@@ -5,8 +5,8 @@ from temporalio import workflow
 
 from agents.simple_agent import SimpleAgent
 from datamodels.agent_builder import AgentBuilder
+from datamodels.codeact import CodeActAgentDeps
 from datamodels.prompts import AgentPrompts, Prompts
-from datamodels.sandbox import SandboxBaseArgs
 from workflows.base.codeact_agent_workflow import CodeActAgentWorkflow
 
 
@@ -27,7 +27,8 @@ class SimpleAgentWorkflow(CodeActAgentWorkflow):
             )
             agent_output = await agent.run(
                 user_prompt=user_task,
-                deps=SandboxBaseArgs(container_id=self.container_id),
+                deps=CodeActAgentDeps(container_id=self.container_id,
+                                      python_packages=["numpy", "pandas"]),
             )
             return agent_output.output
         finally:

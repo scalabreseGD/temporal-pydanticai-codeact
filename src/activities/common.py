@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import jinja2
 import yaml
 from temporalio import activity
 from temporalio.client import Client
@@ -168,6 +169,23 @@ def create_unique_id(input_string: str) -> str:
     return hashlib.sha256(input_string.encode('utf-8')).hexdigest()
 
 
+def render_jinja_template(template_str: str, arguments: dict[str, Any]):
+    """
+    Render a Jinja2 template string with the given keyword arguments.
+
+    This function takes a Jinja2 template string and renders it with the provided
+    context variables, returning the processed template as a string.
+
+    Args:
+        template_str: The Jinja2 template string to render.
+        arguments: Keyword arguments to pass to the template rendering context.
+
+    Returns:
+        str: The rendered template as a string.
+    """
+    return jinja2.Template(template_str).render(**arguments)
+
+
 @activity.defn
 async def get_configs() -> dict[str, Any]:
     return load_config()
@@ -176,3 +194,8 @@ async def get_configs() -> dict[str, Any]:
 @activity.defn
 async def get_prompts() -> Prompts:
     return read_prompts()
+
+
+@activity.defn
+async def render_jinja(template_str: str, arguments: dict[str, Any]):
+    return render_jinja_template(template_str, arguments)
