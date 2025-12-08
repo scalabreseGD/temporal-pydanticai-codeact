@@ -1,3 +1,24 @@
+"""
+Save current Python globals to persistent state.
+
+This script is injected after user code execution to persist variables
+for future executions. It filters and saves all picklable, non-private
+variables from the global namespace.
+
+Filtering rules:
+- Excludes variables starting with _ (private)
+- Excludes callables (functions, methods)
+- Excludes modules and types
+- Excludes imported standard library names
+- Only includes picklable objects (verified before saving)
+
+This script is used by the execute_python operation when persist_state=True.
+
+Note:
+    The filtering ensures that only user-created data variables persist,
+    not functions, classes, or imported modules.
+"""
+
 import pickle
 import io
 import types

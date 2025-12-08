@@ -1,3 +1,14 @@
+"""
+Temporal worker for running sandbox and agent workflows.
+
+This module sets up and runs a Temporal worker that can execute:
+- SandboxWorkflow: Individual sandbox operations
+- SimpleAgentWorkflow: Complete agent execution with sandbox
+
+The worker registers all necessary activities and plugins for PydanticAI
+agent execution within Temporal workflows.
+"""
+
 import asyncio
 import logging
 import os
@@ -18,6 +29,40 @@ logging.basicConfig(level=logging.INFO)
 
 
 async def run_worker():
+    """
+    Initialize and run the Temporal worker for sandbox operations.
+
+    Sets up a Temporal worker with:
+    - Workflows: SandboxWorkflow, SimpleAgentWorkflow
+    - Activities: All sandbox operations + utility activities (get_prompts, etc.)
+    - Plugins: PydanticAIPlugin for agent execution, AgentPlugin for SimpleAgent
+
+    Configuration is loaded from:
+    - Environment variables (.env file)
+    - app_conf.yml (Temporal connection, LLM configs)
+    - agent_prompts.yml (Agent prompts and instructions)
+
+    The worker connects to the task queue specified by the TASK_QUEUE
+    environment variable (defaults to 'sample_queue').
+
+    Raises:
+        FileNotFoundError: If configuration files are not found.
+        ConnectionError: If unable to connect to Temporal server.
+
+    Note:
+        This function runs indefinitely until interrupted (Ctrl+C).
+        The worker will process workflows and activities as they are scheduled.
+
+    Example:
+        ```bash
+        # Set up environment
+        export TASK_QUEUE=my-queue
+        export GEMINI_API_KEY=your-key
+
+        # Run worker
+        python -m workers.sandbox_worker
+        ```
+    """
     app_configurations = load_config()
     prompts = read_prompts()
     client = await get_temporal_client(app_configurations['temporal'],

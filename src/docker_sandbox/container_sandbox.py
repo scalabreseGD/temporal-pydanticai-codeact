@@ -1,3 +1,22 @@
+"""
+Docker-based sandbox for safe code execution with persistent state.
+
+This module provides three sandbox implementations for executing Python and bash
+code in isolated Docker containers with persistent variable state:
+
+1. PersistentContainerSandbox: Core implementation with container lifecycle management
+2. DurablePersistentContainerSandbox: Temporal activity wrapper for workflow integration
+3. StatelessPersistentSandbox: Agent instrumentation layer for serverless execution
+
+Features:
+- Isolated execution in Docker containers
+- Persistent Python variable state across executions (via pickle)
+- Package installation (system and Python)
+- File operations (read/write/list)
+- Container lifecycle management
+- Thread-safe async operations
+"""
+
 import asyncio
 import inspect
 import json
@@ -21,6 +40,56 @@ from .sandbox import SANDBOX_DIR, DOCKERFILE_PATH
 
 
 class PersistentContainerSandbox:
+    """
+    Docker-based sandbox with persistent Python variable state.
+
+    Manages the lifecycle of Docker containers for code execution, with support
+    for persistent state across multiple code executions. Variables created in
+    one execution are available in subsequent executions within the same container.
+
+    The sandbox uses a custom Docker image with Python and uv package manager,
+    and maintains state via pickle serialization in /tmp/sandbox_state/.
+
+    Attributes:
+        client: Docker client for container management.
+        sandbox_dir: Directory containing Dockerfile and state management scripts.
+        dockerfile_path: Path to the Dockerfile for building the sandbox image.
+        image_name: Name of the Docker image.
+        image_tag: Tag for the Docker image.
+        full_image_name: Complete image identifier (name:tag).
+        memory_limit: Memory limit for containers (e.g., '512m').
+        cpu_limit: CPU limit for containers (e.g., 1.0 = 1 core).
+        enable_network: Whether containers should have network access.
+        containers: Dict mapping container IDs to container objects.
+        executor: ThreadPoolExecutor for async Docker operations.
+
+    Example:
+        ```python
+        sandbox = PersistentContainerSandbox()
+        container_id = await sandbox.start_container(
+            StartContainerArgs(python_packages=['numpy', 'pandas'])
+        )
+
+        result = await sandbox.execute_python(
+            ExecutePythonArgs(
+                container_id=container_id,
+                code="x = 42\\nprint(x)"
+            )
+        )
+        print(result['output'])  # "42"
+
+        # State persists across executions
+        result2 = await sandbox.execute_python(
+            ExecutePythonArgs(
+                container_id=container_id,
+                code="print(x * 2)"
+            )
+        )
+        print(result2['output'])  # "84"
+
+        await sandbox.stop_container(SandboxBaseArgs(container_id=container_id))
+        ```
+    """
     def __init__(
             self,
             dockerfile_path: str = None,
@@ -652,6 +721,28 @@ class PersistentContainerSandbox:
 
 
 class DurablePersistentContainerSandbox(PersistentContainerSandbox):
+    """
+    Temporal-compatible version of PersistentContainerSandbox.
+
+    Wraps all PersistentContainerSandbox methods as Temporal activities,
+    enabling container operations to be executed as part of durable workflows.
+    Each method is decorated with @activity.defn for Temporal registration.
+
+    All methods have identical signatures and behavior to the parent class,
+    but are registered as Temporal activities for workflow orchestration.
+
+    Example:
+        ```python
+        sandbox = DurablePersistentContainerSandbox()
+        worker = Worker(
+            client,
+            task_queue='my-queue',
+            workflows=[MyWorkflow],
+            activities=sandbox.activities()
+        )
+        await worker.run()
+        ```
+    """
 
     def activities(self):
         """Return list of activity methods for the Temporal worker"""
@@ -740,6 +831,33 @@ class DurablePersistentContainerSandbox(PersistentContainerSandbox):
 
 
 class StatelessPersistentSandbox:
+    """
+    Serverless sandbox adapter for instrumenting PydanticAI agents.
+
+    Converts DurablePersistentContainerSandbox activities into PydanticAI
+    agent tools. Each activity becomes a tool that spawns a child workflow
+    for execution, enabling stateless agent operations while delegating
+    container management to Temporal workflows.
+
+    This approach allows agents to use sandbox capabilities without managing
+    container state directly - all state is managed by the parent workflow.
+
+    Example:
+        ```python
+        # In your agent workflow:
+        agent = Agent('gemini-2.5-pro')
+        sandbox = StatelessPersistentSandbox()
+
+        # Instrument agent with sandbox tools (except blacklisted ones)
+        agent = await sandbox.instrument_agent(
+            agent,
+            blacklist=['start_container', 'stop_container']
+        )
+
+        # Agent can now call execute_python, execute_bash, etc. as tools
+        # Each tool call spawns a child SandboxWorkflow for execution
+        ```
+    """
     from typing import Type, Dict, Any, Optional
     from pydantic import BaseModel
 

@@ -50,6 +50,8 @@ class BaseAgent:
         - _build_agent: Construct the agent with its specific configuration
     """
     agent_name: str
+    deps_type: type[AgentDepsT] = NoneType
+    output_type: OutputSpec[OutputDataT] = str
 
     def __init__(self, prompts: AgentPrompts):
         """
@@ -106,8 +108,6 @@ class BaseAgent:
     async def _build_agent(self,
                            agent_builder: AgentBuilder,
                            event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
-                           deps_type: type[AgentDepsT] = NoneType,
-                           output_type: OutputSpec[OutputDataT] = str,
                            **kwargs):
         toolsets = await self._get_mcp_toolsets(**kwargs)
 
@@ -118,8 +118,8 @@ class BaseAgent:
                       system_prompt=self.system_prompt,
                       instructions=self.instructions(),
                       event_stream_handler=event_stream_handler,
-                      deps_type=deps_type,
-                      output_type=output_type
+                      deps_type=self.deps_type,
+                      output_type=self.output_type
                       )
 
         return agent

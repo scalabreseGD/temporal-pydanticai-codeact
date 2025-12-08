@@ -1,3 +1,28 @@
+"""
+Read a specific variable from the persistent state.
+
+Takes a variable name as a command-line argument and returns its value
+and type as JSON. Handles serialization of both simple and complex types.
+
+Usage:
+    python read_variable.py variable_name
+
+Args (command-line):
+    variable_name: Name of the variable to retrieve
+
+Output:
+    JSON object with:
+    - success: bool indicating if variable was found
+    - value: The variable's value (serialized if complex type)
+    - type: The variable's type name
+    - error: Error message if operation failed
+    - note: Additional information about serialization
+
+Example output:
+    {"success": true, "value": 42, "type": "int"}
+    {"success": false, "error": "Variable 'foo' not found in state"}
+"""
+
 import pickle
 import json
 import sys

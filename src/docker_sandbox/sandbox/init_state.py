@@ -1,3 +1,14 @@
+"""
+Initialize persistent state storage for sandbox containers.
+
+Creates the state directory and initializes an empty pickled state file.
+This script is executed once during container startup to set up the
+persistent variable storage system.
+
+The state file stores Python variables across code executions, enabling
+stateful REPL-like behavior within the sandbox.
+"""
+
 import pickle
 import os
 

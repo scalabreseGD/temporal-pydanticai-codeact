@@ -1,3 +1,17 @@
+"""
+List all variables in the persistent state with their types.
+
+Reads the persistent state and returns a JSON mapping of variable names
+to their type names (e.g., {"x": "int", "data": "DataFrame"}).
+
+Output:
+    JSON object mapping variable names to type strings, or error object
+    if state cannot be read.
+
+Example output:
+    {"x": "int", "y": "float", "data": "list", "model": "LinearRegression"}
+"""
+
 import pickle
 
 try:

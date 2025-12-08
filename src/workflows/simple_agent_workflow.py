@@ -1,3 +1,11 @@
+"""
+Example workflow demonstrating SimpleAgent with sandbox execution.
+
+This module provides SimpleAgentWorkflow, a complete example of orchestrating
+a code-executing agent with Temporal. It demonstrates the full lifecycle:
+container startup, agent configuration and execution, and container cleanup.
+"""
+
 from datetime import timedelta
 from typing import Any
 
@@ -12,9 +20,58 @@ from workflows.base.codeact_agent_workflow import CodeActAgentWorkflow
 
 @workflow.defn
 class SimpleAgentWorkflow(CodeActAgentWorkflow):
+    """
+    End-to-end workflow for executing tasks with SimpleAgent.
+
+    Demonstrates the complete pattern for code-executing agent workflows:
+    1. Start sandbox container with required packages
+    2. Load configuration (prompts, model settings)
+    3. Build and run agent with sandbox tools
+    4. Clean up container in finally block
+
+    Inherits container management methods from CodeActAgentWorkflow.
+
+    Example:
+        ```python
+        client = await get_temporal_client(config)
+        result = await client.execute_workflow(
+            'SimpleAgentWorkflow',
+            arg='Calculate the mean and standard deviation of [1, 2, 3, 4, 5]',
+            id='simple-agent-123',
+            task_queue='my-queue'
+        )
+        print(result)  # Agent's output
+        ```
+    """
 
     @workflow.run
     async def run(self, user_task: str) -> str:
+        """
+        Execute a user task using SimpleAgent with sandbox tools.
+
+        Orchestrates the complete agent execution lifecycle:
+        1. Starts container with numpy and pandas pre-installed
+        2. Loads prompts and model configuration from activities
+        3. Builds SimpleAgent with Gemini model
+        4. Runs agent with user task and container dependencies
+        5. Returns agent output
+        6. Ensures container cleanup in finally block
+
+        Args:
+            user_task: User's natural language task description.
+                Example: "Load iris dataset and calculate summary statistics"
+
+        Returns:
+            str: Agent's final output/response to the task.
+
+        Raises:
+            ApplicationError: If container operations fail.
+            WorkflowFailureError: If agent execution fails.
+
+        Note:
+            The container is always cleaned up even if the workflow fails,
+            preventing resource leaks.
+        """
         workflow.logger.info(f"Starting container...")
         await self.start_sandbox_container(python_packages=["numpy", "pandas"])
         workflow.logger.info(f"Started container {self.container_id}")

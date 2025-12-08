@@ -2,6 +2,10 @@
 
 This demo showcases the **SandboxWorkflow** with persistent state management across multiple Python script executions.
 
+> **💡 New to Code Act PydanticAI?** Start with the [Getting Started Guide](getting-started.md) for setup instructions.
+>
+> **📚 Looking for API details?** See the [API Reference](api-reference.md) and [Sandbox Operations](sandbox-operations.md) for complete documentation.
+
 ## Overview
 
 The demo demonstrates:
@@ -273,7 +277,23 @@ print(f"Results: {result}")
 
 ## Next Steps
 
-- Explore the `SandboxWorkflow` implementation in `src/workflows/sandbox_workflow.py`
-- Review activity implementations in `src/docker_sandbox/container_sandbox.py`
-- Check data models in `src/datamodels/sandbox.py`
-- Experiment with more complex multi-step workflows
+### Learn More
+
+- **[Getting Started](getting-started.md)** - Complete tutorial for beginners
+- **[Architecture](architecture.md)** - Understand how components work together
+- **[Examples](examples.md)** - More practical usage patterns
+- **[Sandbox Operations](sandbox-operations.md)** - Complete operation reference
+- **[API Reference](api-reference.md)** - Full API documentation
+
+### Explore the Code
+
+- `SandboxWorkflow` implementation: `src/workflows/sandbox_workflow.py:18-81`
+- Activity implementations: `src/docker_sandbox/container_sandbox.py:42-880`
+- Data models: `src/datamodels/sandbox.py`
+- State management scripts: `src/docker_sandbox/sandbox/*.py`
+
+### Try More Examples
+
+- **Multi-step calculations** with persistent state (see [Examples](examples.md#3-multi-step-calculation-with-state))
+- **Data analysis workflows** with pandas and numpy (see [Examples](examples.md#2-data-analysis-agent))
+- **Custom agents** extending CodeActAgent (see [Examples](examples.md#5-custom-agent-extension))
