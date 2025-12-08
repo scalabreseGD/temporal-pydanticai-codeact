@@ -2,7 +2,7 @@ from enum import StrEnum
 from typing import Optional, List, Dict, Any, Annotated, Literal
 
 import pydantic
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 
 
 class SandboxTaskTypes(StrEnum):
@@ -23,10 +23,6 @@ class SandboxTaskTypes(StrEnum):
     GET_ALL_CONTAINERS = 'get_all_containers'
     CLEANUP_CONTAINERS = 'cleanup_containers'
 
-    # @staticmethod
-    # def exists(task_value: str) -> bool:
-    #     return task_value in {item.value for item in SandboxTaskTypes}
-
     @staticmethod
     def list_tasks():
         return ','.join([str(element.value) for element in SandboxTaskTypes])
@@ -35,12 +31,18 @@ class SandboxTaskTypes(StrEnum):
 class SandboxBaseArgs(BaseModel):
     container_id: str
     kind: Literal['base'] = Field(default='base')
+    model_config = {'from_attributes': True}
 
 
 class StartContainerArgs(BaseModel):
     python_packages: Optional[List[str]] = Field(default=None, description="List of Python packages to install")
     system_packages: Optional[List[str]] = Field(default=None, description="List of system packages to install")
     kind: Literal['start_container'] = Field(default='start_container')
+    model_config = {'from_attributes': True}
+
+
+class InstallAdditionalPackagesArgs(SandboxBaseArgs, StartContainerArgs):
+    kind: Literal['install_additional_packages'] = Field(default='install_additional_packages')
 
 
 class ReadVariableInStateArgs(SandboxBaseArgs):
@@ -74,14 +76,13 @@ class WriteFileArgs(SandboxBaseArgs):
 
 
 SandboxTaskArgs = Annotated[
-    SandboxBaseArgs | StartContainerArgs | ReadVariableInStateArgs | ExecutePythonArgs | ExecuteBashArgs | ReadOperationsArgs | WriteFileArgs,
+    SandboxBaseArgs | StartContainerArgs | ReadVariableInStateArgs | ExecutePythonArgs | ExecuteBashArgs | ReadOperationsArgs | WriteFileArgs | InstallAdditionalPackagesArgs,
     pydantic.Discriminator('kind')]
+
+# TypeAdapter for converting dict to SandboxTaskArgs
+SandboxTaskArgsAdapter = TypeAdapter(SandboxTaskArgs)
 
 
 class SandboxInputTask(BaseModel):
     task_name: SandboxTaskTypes
     task_args: Optional[SandboxTaskArgs] = Field(default=None, description="Task arguments to pass to the task")
-
-
-class SandboxChildWorkflowModel(SandboxBaseArgs):
-    sandbox_workflow_id: str

@@ -6,7 +6,7 @@ from temporalio import workflow
 from agents.simple_agent import SimpleAgent
 from datamodels.agent_builder import AgentBuilder
 from datamodels.prompts import AgentPrompts, Prompts
-from datamodels.sandbox import SandboxChildWorkflowModel
+from datamodels.sandbox import SandboxBaseArgs
 from workflows.base.codeact_agent_workflow import CodeActAgentWorkflow
 
 
@@ -27,8 +27,7 @@ class SimpleAgentWorkflow(CodeActAgentWorkflow):
             )
             agent_output = await agent.run(
                 user_prompt=user_task,
-                deps=SandboxChildWorkflowModel(container_id=self.container_id,
-                                               sandbox_workflow_id=self.child_workflow_id),
+                deps=SandboxBaseArgs(container_id=self.container_id),
             )
             return agent_output.output
         finally:

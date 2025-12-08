@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 
 from dotenv import load_dotenv, find_dotenv
@@ -13,7 +14,7 @@ from workflows.sandbox_workflow import SandboxWorkflow
 from workflows.simple_agent_workflow import SimpleAgentWorkflow
 
 load_dotenv(find_dotenv())
-
+logging.basicConfig(level=logging.INFO)
 
 async def run_worker():
     app_configurations = load_config()
