@@ -257,6 +257,7 @@ python run_sandbox_workflow.py
 - **[API Reference](docs/api-reference.md)** - Complete API documentation for all modules
 - **[Sandbox Operations](docs/sandbox-operations.md)** - Detailed reference for all sandbox operations
 - **[Examples](docs/examples.md)** - Practical examples with explanations
+- **[Testing Guide](docs/testing.md)** - Comprehensive testing documentation
 - **[Sandbox Workflow Demo](docs/sandbox_workflow_demo.md)** - Complete demo walkthrough
 
 ## Examples
@@ -359,15 +360,43 @@ agent = await sandbox.instrument_agent(
 - `APP_PROMPTS_PATH` - Path to agent prompts file
 - `GEMINI_API_KEY` - Google Gemini API key (or in app_conf.yml)
 
+## Testing
+
+Comprehensive test suite using pytest with async support:
+
+```bash
+# Run all tests
+pytest
+
+# Run unit tests only (no Docker/Temporal required)
+pytest -m unit
+
+# Run with coverage
+pytest --cov=src --cov-report=html
+
+# Run specific test file
+pytest tests/test_datamodels_sandbox.py
+```
+
+### Test Categories
+
+- **Unit Tests** (`-m unit`) - Fast tests with mocked dependencies
+- **Integration Tests** (`-m integration`) - Require Docker and/or Temporal
+- **Docker Tests** (`-m docker`) - Require Docker daemon
+- **Temporal Tests** (`-m temporal`) - Require Temporal server
+
+See [Testing Guide](docs/testing.md) for comprehensive testing documentation.
+
 ## Contributing
 
 Contributions are welcome! Please ensure:
 
 1. Code follows existing patterns and style
 2. All tests pass (`pytest`)
-3. Type checking passes (`mypy src/`)
-4. Linting passes (`ruff check .`)
-5. New features include documentation and examples
+3. Unit tests pass without external services (`pytest -m unit`)
+4. Type checking passes (`mypy src/`)
+5. Linting passes (`ruff check .`)
+6. New features include tests, documentation, and examples
 
 ## License
 
