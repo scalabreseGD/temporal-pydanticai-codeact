@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -11,7 +12,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from datamodels.sandbox import StartContainerArgs, SandboxBaseArgs, ReadVariableInStateArgs, ExecutePythonArgs, \
-    ExecuteBashArgs, WriteFileArgs, ReadOperationsArgs
+    ExecuteBashArgs, WriteFileArgs, ReadOperationsArgs, SandboxTaskTypes
 from .sandbox import SANDBOX_DIR, DOCKERFILE_PATH
 
 
@@ -681,3 +682,26 @@ class PersistentContainerSandbox:
                 print(f"Error stopping container {container_id[:12]}: {e}")
         self.executor.shutdown(wait=True)
         return {"success": True}
+
+
+class ServerlessPersistentSandbox:
+
+    @staticmethod
+    async def get_workflow_id():
+        if activity.in_activity():
+            workflow_id = f"{activity.info().workflow_id}-sandbox"
+            return workflow_id
+        else:
+            raise ApplicationError(message="Not in activity", non_retryable=True)
+
+    async def start_container(self, input_model: StartContainerArgs):
+        if activity.in_activity():
+            workflow_id = await self.get_workflow_id()
+            await activity.client().start_workflow(
+                workflow='SandboxWorkflow',
+                id=workflow_id,
+                task_queue=activity.info().task_queue,
+                start_signal=str(SandboxTaskTypes.START_CONTAINER.value),
+                run_timeout=timedelta(hours=2),
+                start_signal_args=[input_model],
+            )

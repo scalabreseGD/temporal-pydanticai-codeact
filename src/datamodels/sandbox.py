@@ -38,7 +38,6 @@ class SandboxBaseArgs(BaseModel):
 
 
 class StartContainerArgs(BaseModel):
-    container_id: str
     python_packages: Optional[List[str]] = Field(default=None, description="List of Python packages to install")
     system_packages: Optional[List[str]] = Field(default=None, description="List of system packages to install")
     kind: Literal['start_container'] = Field(default='start_container')

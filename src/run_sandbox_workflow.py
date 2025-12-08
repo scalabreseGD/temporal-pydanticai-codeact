@@ -89,7 +89,6 @@ async def run_workflow_demo():
         SandboxInputTask(
             task_name=SandboxTaskTypes.START_CONTAINER,
             task_args=StartContainerArgs(
-                container_id=container_id_placeholder,
                 python_packages=["numpy", "pandas"],
                 system_packages=None,
             ),
