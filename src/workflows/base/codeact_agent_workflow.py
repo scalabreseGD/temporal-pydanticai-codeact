@@ -4,7 +4,7 @@ from typing import List, Optional, Any
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
-    from datamodels.sandbox import SandboxTaskTypes, StartContainerArgs
+    from datamodels.sandbox import SandboxTaskTypes, StartContainerArgs, SandboxBaseArgs
 
 
 class CodeActAgentWorkflow:
@@ -30,6 +30,7 @@ class CodeActAgentWorkflow:
     async def stop_sandbox_container(self):
         await workflow.execute_activity(
             activity=str(SandboxTaskTypes.STOP_CONTAINER.value),
+            arg=SandboxBaseArgs(container_id=self.container_id),
             start_to_close_timeout=timedelta(minutes=10),
             result_type=dict[str, Any]
         )

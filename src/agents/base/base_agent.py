@@ -18,7 +18,7 @@ from pydantic_ai._run_context import AgentDepsT
 from pydantic_ai.agent import EventStreamHandler
 from temporalio import workflow
 
-from agents.default_settings import DEFAULT_ACTIVITY_CONFIG, default_toolset_activity_config
+from agents.base.default_settings import DEFAULT_ACTIVITY_CONFIG, default_toolset_activity_config
 from datamodels.agent_builder import TemporalWrapperConfig, AgentBuilder
 
 with workflow.unsafe.imports_passed_through():
@@ -97,25 +97,11 @@ class BaseAgent:
         return model
 
     async def _get_mcp_toolsets(self, **env_vars) -> dict[str, WrapperToolset]:
-        """
-        Get MCP (Model Context Protocol) toolsets for this agent.
-
-        Subclasses must implement this to define which tools are available.
-
-        Args:
-            **env_vars: Environment variables needed for toolset configuration.
-
-        Returns:
-            Dict mapping toolset IDs to WrapperToolset instances.
-
-        Raises:
-            NotImplementedError: Must be implemented by subclasses.
-        """
-        raise NotImplementedError
+        return {}
 
     async def _build_agent(self,
                            agent_builder: AgentBuilder,
-                           event_stream_handler=EventStreamHandler[AgentDepsT] | None,
+                           event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
                            **kwargs):
         toolsets = await self._get_mcp_toolsets(**kwargs)
         instructions = self.instructions[:]
@@ -133,7 +119,7 @@ class BaseAgent:
 
     async def wrap_agent(self, agent: Agent,
                          temporal_wrapper_args: Optional[TemporalWrapperConfig],
-                         event_stream_handler=EventStreamHandler[AgentDepsT] | None,
+                         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
                          **kwargs) -> TemporalAgent:
 
         toolsets = await self._get_mcp_toolsets(**kwargs)
@@ -149,11 +135,12 @@ class BaseAgent:
     @classmethod
     async def from_agent_confs(cls,
                                agent_builder: AgentBuilder,
-                               event_stream_handler=None,
+                               event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
                                **kwargs) -> TemporalAgent:
         agent_factory = cls(prompts=agent_builder.prompts[cls.agent_name])
         agent = await agent_factory._build_agent(agent_builder=agent_builder, event_stream_handler=event_stream_handler,
                                                  **kwargs)
-        return await agent_builder.wrap_agent(agent=agent,
+        return await agent_factory.wrap_agent(agent=agent,
                                               temporal_wrapper_args=agent_builder.temporal_wrapper_args,
+                                              event_stream_handler=event_stream_handler,
                                               **kwargs)

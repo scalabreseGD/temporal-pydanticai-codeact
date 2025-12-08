@@ -8,7 +8,7 @@ from datamodels.agent_builder import AgentBuilder
 from datamodels.prompts import AgentPrompts
 
 with workflow.unsafe.imports_passed_through():
-    from agents.base_agent import BaseAgent
+    from agents.base.base_agent import BaseAgent
 
 
 class CodeActAgent(BaseAgent):
@@ -25,7 +25,7 @@ class CodeActAgent(BaseAgent):
         self.container_id = container_id
 
     async def _build_agent(self, agent_builder: AgentBuilder,
-                           event_stream_handler=EventStreamHandler[AgentDepsT] | None, **kwargs):
+                           event_stream_handler: EventStreamHandler[AgentDepsT] | None = None, **kwargs):
         base_agent = await super()._build_agent(agent_builder, event_stream_handler, **kwargs)
         # TODO add now the tools
         return base_agent

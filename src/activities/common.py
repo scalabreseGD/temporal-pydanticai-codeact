@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
+from temporalio import activity
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
 
@@ -165,3 +166,13 @@ def create_unique_id(input_string: str) -> str:
         str: SHA256 hash of the input string.
     """
     return hashlib.sha256(input_string.encode('utf-8')).hexdigest()
+
+
+@activity.defn
+async def get_configs() -> dict[str, Any]:
+    return load_config()
+
+
+@activity.defn
+async def get_prompts() -> Prompts:
+    return read_prompts()

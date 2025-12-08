@@ -28,7 +28,6 @@ from datamodels.sandbox import (
     ExecutePythonArgs,
     SandboxBaseArgs, ReadVariableInStateArgs,
 )
-from workflows.sandbox_workflow import SandboxWorkflow
 
 load_dotenv(find_dotenv())
 
@@ -64,7 +63,16 @@ async def run_workflow_demo():
 
     # Generate unique workflow ID
     workflow_id = f"sandbox-demo-1"
-    task_queue = os.getenv('TASK_QUEUE', 'airflow-spark-kb-agent-queue')
+    task_queue = os.getenv('TASK_QUEUE', 'sample_queue')
+
+    output = await client.execute_workflow(
+        'SimpleAgentWorkflow',
+        id=workflow_id,
+        task_queue=task_queue,
+        arg="Generate a random pandas dataframe with 3 columns and 10 rows",
+        id_conflict_policy=WorkflowIDConflictPolicy.TERMINATE_EXISTING
+    )
+    print(output)
 
     print(f"Starting workflow: {workflow_id}")
     print(f"Task queue: {task_queue}\n")

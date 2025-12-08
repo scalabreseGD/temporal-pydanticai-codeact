@@ -695,6 +695,10 @@ class ServerlessPersistentSandbox:
             raise ApplicationError(message="Not in activity", non_retryable=True)
 
     async def start_container(self, input_model: StartContainerArgs):
+
+        for tool_name in SandboxTaskTypes:
+            tool_name.value
+
         if activity.in_activity():
             workflow_id = await self.get_workflow_id()
             await activity.client().start_workflow(
