@@ -43,14 +43,12 @@ class StartContainerArgs(BaseModel):
     kind: Literal['start_container'] = Field(default='start_container')
 
 
-class ReadVariableInStateArgs(BaseModel):
-    container_id: str
+class ReadVariableInStateArgs(SandboxBaseArgs):
     variable_name: str
     kind: Literal['read_variable'] = Field(default='read_variable')
 
 
-class ExecutePythonArgs(BaseModel):
-    container_id: str
+class ExecutePythonArgs(SandboxBaseArgs):
     code: str
     variables: Optional[Dict[str, Any]] = Field(default=None,
                                                 description="Dictionary of Python variables to be injected in the script")
@@ -59,20 +57,17 @@ class ExecutePythonArgs(BaseModel):
     kind: Literal['execute_python'] = Field(default='execute_python')
 
 
-class ExecuteBashArgs(BaseModel):
-    container_id: str
+class ExecuteBashArgs(SandboxBaseArgs):
     script: str
     kind: Literal['execute_bash'] = Field(default='execute_bash')
 
 
-class ReadOperationsArgs(BaseModel):
-    container_id: str
+class ReadOperationsArgs(SandboxBaseArgs):
     path: str
     kind: Literal['read_operations'] = Field(default='read_operations')
 
 
-class WriteFileArgs(BaseModel):
-    container_id: str
+class WriteFileArgs(SandboxBaseArgs):
     path: str
     content: str
     kind: Literal['write_file'] = Field(default='write_file')
@@ -86,3 +81,7 @@ SandboxTaskArgs = Annotated[
 class SandboxInputTask(BaseModel):
     task_name: SandboxTaskTypes
     task_args: Optional[SandboxTaskArgs] = Field(default=None, description="Task arguments to pass to the task")
+
+
+class SandboxChildWorkflowModel(SandboxBaseArgs):
+    sandbox_workflow_id: str

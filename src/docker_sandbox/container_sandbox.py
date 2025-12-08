@@ -1,18 +1,23 @@
 import asyncio
+import inspect
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Type, get_type_hints, Optional
 
 import docker
 from docker.errors import ImageNotFound
+from pydantic import BaseModel
+from pydantic_ai import Agent, RunContext
 from temporalio import activity
+from temporalio.client import WorkflowExecutionStatus, WorkflowHandle
 from temporalio.exceptions import ApplicationError
+from temporalio.workflow import ChildWorkflowHandle
 
 from datamodels.sandbox import StartContainerArgs, SandboxBaseArgs, ReadVariableInStateArgs, ExecutePythonArgs, \
-    ExecuteBashArgs, WriteFileArgs, ReadOperationsArgs, SandboxTaskTypes
+    ExecuteBashArgs, WriteFileArgs, ReadOperationsArgs, SandboxInputTask, SandboxTaskTypes
 from .sandbox import SANDBOX_DIR, DOCKERFILE_PATH
 
 
@@ -50,27 +55,6 @@ class PersistentContainerSandbox:
         self.executor = ThreadPoolExecutor(max_workers=10)
 
         self._ensure_image()
-
-    def activities(self):
-        """Return list of activity methods for the Temporal worker"""
-        return [
-            self.start_container,
-            self.stop_container,
-            self.restart_container,
-            self.get_container_info,
-            self.get_all_containers,
-            self.cleanup_containers,
-            self.get_python_state,
-            self.read_state_variable,
-            self.clear_python_state,
-            self.list_state_variables,
-            self.execute_python,
-            self.execute_bash,
-            self.install_additional_packages,
-            self.write_file,
-            self.read_file,
-            self.list_files,
-        ]
 
     def _ensure_image(self):
         """Ensure Docker image exists, build if not present"""
@@ -118,7 +102,6 @@ class PersistentContainerSandbox:
             print(f"Build failed: {e}")
             raise
 
-    @activity.defn(name='start_container')
     async def start_container(
             self,
             input_model: StartContainerArgs
@@ -256,7 +239,6 @@ class PersistentContainerSandbox:
                 "stderr": str(e)
             }
 
-    @activity.defn(name='execute_python')
     async def execute_python(
             self,
             input_model: ExecutePythonArgs
@@ -318,7 +300,6 @@ class PersistentContainerSandbox:
                 "exit_code": -1
             }
 
-    @activity.defn(name='get_python_state')
     async def get_python_state(self, input_model: SandboxBaseArgs) -> Dict[str, Any]:
         """Get the current persisted Python state from a container"""
         container = self.containers.get(input_model.container_id)
@@ -356,7 +337,6 @@ class PersistentContainerSandbox:
                 return {}
         return {}
 
-    @activity.defn(name='clear_python_state')
     async def clear_python_state(self, input_model: SandboxBaseArgs):
         """Clear the persisted Python state in a container"""
         container = self.containers.get(input_model.container_id)
@@ -386,7 +366,6 @@ class PersistentContainerSandbox:
 
         return await loop.run_in_executor(self.executor, _exec)  # type: ignore[arg-type]
 
-    @activity.defn(name='list_state_variables')
     async def list_state_variables(self, input_model: SandboxBaseArgs) -> Dict[str, str]:
         """List all variables in the persisted state with their types"""
         container = self.containers.get(input_model.container_id)
@@ -424,7 +403,6 @@ class PersistentContainerSandbox:
                 return {}
         return {}
 
-    @activity.defn(name='read_state_variable')
     async def read_state_variable(self, input_model: ReadVariableInStateArgs) -> Dict[str, Any]:
         """Read a specific variable from the persisted state"""
         container = self.containers.get(input_model.container_id)
@@ -469,7 +447,6 @@ class PersistentContainerSandbox:
                 "error": result.get("error", "Execution failed")
             }
 
-    @activity.defn(name='execute_bash')
     async def execute_bash(
             self,
             input_model: ExecuteBashArgs,
@@ -510,7 +487,6 @@ class PersistentContainerSandbox:
                 "exit_code": -1
             }
 
-    @activity.defn(name='install_additional_packages')
     async def install_additional_packages(
             self,
             input_model: StartContainerArgs
@@ -524,7 +500,6 @@ class PersistentContainerSandbox:
         except ApplicationError as e:
             return {"success": False, "error": e.message}
 
-    @activity.defn(name='write_file')
     async def write_file(self, input_model: WriteFileArgs):
         """Write a file to the specified container"""
         container = self.containers.get(input_model.container_id)
@@ -556,7 +531,6 @@ class PersistentContainerSandbox:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    @activity.defn(name='read_file')
     async def read_file(self, input_model: ReadOperationsArgs):
         """Read a file from the specified container"""
         container = self.containers.get(input_model.container_id)
@@ -594,13 +568,11 @@ class PersistentContainerSandbox:
                 "error": str(e)
             }
 
-    @activity.defn(name='list_files')
     async def list_files(self, input_model: ReadOperationsArgs):
         """List files in container directory"""
         return await self.execute_bash(
             input_model=ExecuteBashArgs(container_id=input_model.container_id, script=f"ls -la {input_model.path}"))
 
-    @activity.defn(name='get_container_info')
     async def get_container_info(self, input_model: SandboxBaseArgs):
         """Get information about the specified container"""
         container = self.containers.get(input_model.container_id)
@@ -622,7 +594,6 @@ class PersistentContainerSandbox:
 
         return await loop.run_in_executor(self.executor, _get_info)  # type: ignore[arg-type]
 
-    @activity.defn(name='get_all_containers')
     async def get_all_containers(self):
         """Get information about all managed containers"""
         return {
@@ -630,7 +601,6 @@ class PersistentContainerSandbox:
             for container_id in self.containers.keys()
         }
 
-    @activity.defn(name='stop_container')
     async def stop_container(self, input_model: SandboxBaseArgs):
         """Stop and remove the specified container"""
         container = self.containers.get(input_model.container_id)
@@ -652,7 +622,6 @@ class PersistentContainerSandbox:
         del self.containers[input_model.container_id]
         return {"success": True}
 
-    @activity.defn(name='restart_container')
     async def restart_container(self, input_model: SandboxBaseArgs):
         """Restart the specified container"""
         container = self.containers.get(input_model.container_id)
@@ -668,7 +637,6 @@ class PersistentContainerSandbox:
         await loop.run_in_executor(self.executor, _restart)  # type: ignore[arg-type]
         return {"success": True}
 
-    @activity.defn(name='cleanup_containers')
     async def cleanup_containers(self):
         """
         Cleanup all resources
@@ -684,28 +652,264 @@ class PersistentContainerSandbox:
         return {"success": True}
 
 
-class ServerlessPersistentSandbox:
+class DurablePersistentContainerSandbox(PersistentContainerSandbox):
+
+    def activities(self):
+        """Return list of activity methods for the Temporal worker"""
+        return [
+            self.start_container,
+            self.stop_container,
+            self.restart_container,
+            self.get_container_info,
+            self.get_all_containers,
+            self.cleanup_containers,
+            self.get_python_state,
+            self.read_state_variable,
+            self.clear_python_state,
+            self.list_state_variables,
+            self.execute_python,
+            self.execute_bash,
+            self.install_additional_packages,
+            self.write_file,
+            self.read_file,
+            self.list_files,
+        ]
+
+    @activity.defn
+    async def start_container(self, input_model: StartContainerArgs) -> str:
+        return await super().start_container(input_model)
+
+    @activity.defn
+    async def stop_container(self, input_model: SandboxBaseArgs):
+        return await super().stop_container(input_model)
+
+    @activity.defn
+    async def restart_container(self, input_model: SandboxBaseArgs):
+        return await super().restart_container(input_model)
+
+    @activity.defn
+    async def cleanup_containers(self):
+        return await super().cleanup_containers()
+
+    @activity.defn
+    async def get_all_containers(self):
+        return await super().get_all_containers()
+
+    @activity.defn
+    async def get_container_info(self, input_model: SandboxBaseArgs):
+        return await super().get_container_info(input_model)
+
+    @activity.defn
+    async def list_files(self, input_model: ReadOperationsArgs):
+        return await super().list_files(input_model)
+
+    @activity.defn
+    async def read_file(self, input_model: ReadOperationsArgs):
+        return await super().read_file(input_model)
+
+    @activity.defn
+    async def write_file(self, input_model: WriteFileArgs):
+        return await super().write_file(input_model)
+
+    @activity.defn
+    async def install_additional_packages(self, input_model: StartContainerArgs):
+        return await super().install_additional_packages(input_model)
+
+    @activity.defn
+    async def execute_bash(self, input_model: ExecuteBashArgs):
+        return await super().execute_bash(input_model)
+
+    @activity.defn
+    async def read_state_variable(self, input_model: ReadVariableInStateArgs) -> Dict[str, Any]:
+        return await super().read_state_variable(input_model)
+
+    @activity.defn
+    async def list_state_variables(self, input_model: SandboxBaseArgs) -> Dict[str, str]:
+        return await super().list_state_variables(input_model)
+
+    @activity.defn
+    async def clear_python_state(self, input_model: SandboxBaseArgs):
+        return await super().clear_python_state(input_model)
+
+    @activity.defn
+    async def get_python_state(self, input_model: SandboxBaseArgs) -> Dict[str, Any]:
+        return await super().get_python_state(input_model)
+
+    @activity.defn
+    async def execute_python(self, input_model: ExecutePythonArgs):
+        return await super().execute_python(input_model)
+
+
+class StatelessPersistentSandbox:
 
     @staticmethod
-    async def get_workflow_id():
-        if activity.in_activity():
-            workflow_id = f"{activity.info().workflow_id}-sandbox"
-            return workflow_id
-        else:
-            raise ApplicationError(message="Not in activity", non_retryable=True)
+    def __extract_activities(
+            sandbox_class: Type[DurablePersistentContainerSandbox] = DurablePersistentContainerSandbox,
+            blacklist: List[str] = None
+    ) -> Dict[str, Dict]:
+        """
+        Extract activity names and their input signatures.
 
-    async def start_container(self, input_model: StartContainerArgs):
+        Args:
+            sandbox_class: The sandbox class to inspect
+            blacklist: List of activity names to exclude
 
-        for tool_name in SandboxTaskTypes:
-            tool_name.value
+        Returns:
+            Dict mapping activity_name to {'input_type': Type, 'signature': dict}
+        """
+        if blacklist is None:
+            blacklist = []
 
-        if activity.in_activity():
-            workflow_id = await self.get_workflow_id()
-            await activity.client().start_workflow(
-                workflow='SandboxWorkflow',
-                id=workflow_id,
-                task_queue=activity.info().task_queue,
-                start_signal=str(SandboxTaskTypes.START_CONTAINER.value),
-                run_timeout=timedelta(hours=2),
-                start_signal_args=[input_model],
+        activities = {}
+
+        for name, method in inspect.getmembers(sandbox_class, predicate=inspect.isfunction):
+            if name in blacklist:
+                continue
+
+            if hasattr(method, '__temporal_activity_definition'):
+                type_hints = get_type_hints(method)
+
+                # Get input_model parameter type (skip 'self' and 'return')
+                input_type = type_hints.get('input_model', None)
+
+                activities[name] = {
+                    'input_type': input_type,
+                    'signature': {k: v for k, v in type_hints.items() if k not in ('self', 'return')}
+                }
+
+        return activities
+
+    @staticmethod
+    async def __create_tool(
+            activity_name: str,
+            input_type: Type[BaseModel] = None):
+        """
+        Create a PydanticAI tool that delegates to a Temporal workflow.
+
+        Args:
+            workflow_id: The ID of the temporal workflow
+            activity_name: Name of the activity
+            input_type: Pydantic model for input validation
+
+        Returns:
+            Async function suitable as a PydanticAI tool
+        """
+        if input_type is None:
+            # No input parameters
+            async def tool_func():
+                workflow_id = await StatelessPersistentSandbox.get_workflow_id()
+                if activity.in_activity():
+                    await activity.client().start_workflow(
+                        workflow='SandboxWorkflow',
+                        id=workflow_id,
+                        task_queue=activity.info().task_queue,
+                        start_signal=activity_name,
+                        run_timeout=timedelta(minutes=10),
+                        start_signal_args=[],
+                    )
+
+            tool_func.__name__ = activity_name
+            return tool_func
+
+        # Has input parameters
+        async def tool_func(**kwargs):
+            input_model = input_type(**kwargs)
+
+            if activity.in_activity():
+                workflow_id = await StatelessPersistentSandbox.get_workflow_id()
+                await activity.client().start_workflow(
+                    workflow='SandboxWorkflow',
+                    id=workflow_id,
+                    task_queue=activity.info().task_queue,
+                    start_signal=activity_name,
+                    run_timeout=timedelta(hours=2),
+                    start_signal_args=[input_model],
+                )
+
+        tool_func.__name__ = activity_name
+
+        # Add parameter annotations from input model
+        if input_type:
+            tool_func.__annotations__ = {
+                **{field: field_info.annotation
+                   for field, field_info in input_type.model_fields.items()},
+                'return': None
+            }
+
+        return tool_func
+
+    async def instrument_agent_old(
+            self,
+            agent: Agent,
+            blacklist: List[str] = None
+    ):
+        """
+        Instrument a PydanticAI agent with all sandbox activities as tools.
+
+        Args:
+            agent: PydanticAI Agent to instrument
+            blacklist: List of activity names to exclude
+
+        Example:
+            agent = Agent('openai:gpt-4')
+            instrument_agent(agent, blacklist=['cleanup_containers'])
+        """
+        activities = self.__extract_activities(blacklist=blacklist)
+
+        for activity_name, metadata in activities.items():
+            tool_func = await self.__create_tool(
+                activity_name=activity_name,
+                input_type=metadata['input_type']
             )
+            agent.tool(name=activity_name, strict=True)(tool_func)
+
+        return agent
+
+    @staticmethod
+    async def __get_handle_if_wf_exists(workflow_id) -> WorkflowHandle | None:
+        try:
+            handle = activity.client().get_workflow_handle(workflow_id)
+            desc = await handle.describe()
+            if desc.status == WorkflowExecutionStatus.RUNNING:
+                return handle
+            else:
+                return None
+        except Exception:
+            return None
+
+    async def instrument_agent(self, agent: Agent):
+        @agent.tool(name='execute_python', strict=True)
+        async def execute_python(ctx: RunContext[None], input_model: ExecutePythonArgs):
+            if activity.in_activity():
+                workflow_id = ctx.deps.sandbox_workflow_id
+                handle = await self.__get_handle_if_wf_exists(workflow_id)
+
+                return await StatelessPersistentSandbox.trigger_and_wait_result(
+                    handle=handle,
+                    sandbox_input=SandboxInputTask(
+                        task_name=SandboxTaskTypes.EXECUTE_PYTHON,
+                        task_args=input_model
+                    ),
+                )
+            else:
+                raise ApplicationError(message='No in activity context', non_retryable=True)
+
+        return agent
+
+    @staticmethod
+    async def __wait_for_sandbox_workflow_result(handle: WorkflowHandle | ChildWorkflowHandle):
+        res = None
+        while res is None:
+            res = await handle.query('task_output', result_type=Optional[Any])
+            if res is not None:
+                break
+            else:
+                await asyncio.sleep(5)
+        return res
+
+    @staticmethod
+    async def trigger_and_wait_result(handle: WorkflowHandle | ChildWorkflowHandle,
+                                      sandbox_input: SandboxInputTask):
+        await handle.signal(signal='submit_task',
+                            arg=sandbox_input)
+        return await StatelessPersistentSandbox.__wait_for_sandbox_workflow_result(handle=handle)

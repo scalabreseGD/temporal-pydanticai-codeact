@@ -8,7 +8,7 @@ from temporalio.worker import Worker
 from activities.common import load_config, get_temporal_client, get_prompts, get_configs, read_prompts
 from agents.simple_agent import SimpleAgent
 from datamodels.agent_builder import AgentBuilder
-from docker_sandbox.container_sandbox import PersistentContainerSandbox
+from docker_sandbox.container_sandbox import DurablePersistentContainerSandbox
 from workflows.sandbox_workflow import SandboxWorkflow
 from workflows.simple_agent_workflow import SimpleAgentWorkflow
 
@@ -21,7 +21,7 @@ async def run_worker():
     client = await get_temporal_client(app_configurations['temporal'],
                                        plugins=[PydanticAIPlugin()],
                                        )
-    sandbox_activities = PersistentContainerSandbox()
+    sandbox_activities = DurablePersistentContainerSandbox()
     task_queue = os.getenv('TASK_QUEUE', 'sample_queue')
     utils_activities = [get_prompts, get_configs]
 

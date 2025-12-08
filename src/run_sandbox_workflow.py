@@ -69,7 +69,7 @@ async def run_workflow_demo():
         'SimpleAgentWorkflow',
         id=workflow_id,
         task_queue=task_queue,
-        arg="Generate a random pandas dataframe with 3 columns and 10 rows",
+        arg="Generate a random pandas dataframe with 3 columns and 10 rows and return it as output",
         id_conflict_policy=WorkflowIDConflictPolicy.TERMINATE_EXISTING
     )
     print(output)

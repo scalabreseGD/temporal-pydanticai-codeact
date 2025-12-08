@@ -15,7 +15,8 @@ in distributed workflow contexts.
 from typing import Optional
 
 from pydantic_ai._run_context import AgentDepsT
-from pydantic_ai.agent import EventStreamHandler
+from pydantic_ai.agent import EventStreamHandler, NoneType, Instructions
+from pydantic_ai.output import OutputSpec, OutputDataT
 from temporalio import workflow
 
 from agents.base.default_settings import DEFAULT_ACTIVITY_CONFIG, default_toolset_activity_config
@@ -57,17 +58,20 @@ class BaseAgent:
         Args:
             prompts: Agent-specific prompts including system prompt and instructions.
         """
-        self.__prompts = prompts
+        self._prompts = prompts
 
     @property
     def system_prompt(self) -> str:
         """Get the system prompt for the agent."""
-        return self.__prompts.system_prompt
+        return self._prompts.system_prompt
 
-    @property
-    def instructions(self) -> str:
+    def instructions(self) -> Instructions[AgentDepsT]:
         """Get the instructions for the agent, defaults to empty string if not set."""
-        return self.__prompts.instructions or ''
+
+        async def instructions_cb():
+            return self._prompts.instructions or ''
+
+        return instructions_cb
 
     @staticmethod
     async def _get_gemini_model(model_configs):
@@ -102,17 +106,20 @@ class BaseAgent:
     async def _build_agent(self,
                            agent_builder: AgentBuilder,
                            event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
+                           deps_type: type[AgentDepsT] = NoneType,
+                           output_type: OutputSpec[OutputDataT] = str,
                            **kwargs):
         toolsets = await self._get_mcp_toolsets(**kwargs)
-        instructions = self.instructions[:]
 
         model = await self._get_gemini_model(agent_builder.model_configs)
         agent = Agent(name=self.agent_name,
                       model=model,
                       toolsets=[*toolsets.values()],
                       system_prompt=self.system_prompt,
-                      instructions=instructions,
-                      event_stream_handler=event_stream_handler
+                      instructions=self.instructions(),
+                      event_stream_handler=event_stream_handler,
+                      deps_type=deps_type,
+                      output_type=output_type
                       )
 
         return agent
