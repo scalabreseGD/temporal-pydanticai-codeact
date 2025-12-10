@@ -23,6 +23,12 @@ ENV UV_LINK_MODE=copy \
 # Set working directory
 WORKDIR /app
 
+# Make /app read-only to prevent writing there
+RUN chmod -R 555 /app
+
+# Create output directory for Python scripts to write files
+RUN mkdir -p /output && chmod 777 /output
+
 # Copy sandbox Python scripts into the container
 COPY init_state.py /app/sandbox/init_state.py
 COPY get_state.py /app/sandbox/get_state.py

@@ -25,6 +25,7 @@ from temporalio.common import WorkflowIDConflictPolicy
 
 from activities.common import load_config, get_temporal_client, create_unique_id
 from datamodels.codeact import CodeActAgentOutput
+from datamodels.sandbox import ReadOperationsArgs
 from docker_sandbox.container_sandbox import PersistentContainerSandbox
 
 load_dotenv(find_dotenv())
@@ -244,6 +245,62 @@ async def download_file(
         raise HTTPException(
             status_code=500,
             detail=f"Error downloading file: {str(e)}"
+        )
+
+
+@app.get("/get_python_state")
+async def get_python_state(
+    container_id: str = Query(..., description="Container ID or workflow ID to get state from")
+):
+    """
+    Get the persistent Python state from a container.
+
+    This endpoint retrieves all variables stored in a container's persistent
+    state. Variables are maintained across code executions within the same
+    container.
+
+    Args:
+        container_id: ID or name of the container (can be workflow_id)
+
+    Returns:
+        Dictionary containing all persisted variables and their values
+
+    Raises:
+        HTTPException: If container not found or state retrieval fails
+
+    Example:
+        ```
+        GET /get_python_state?container_id=chat-abc123
+        ```
+
+        Response:
+        ```json
+        {
+            "x": 42,
+            "data": [1, 2, 3, 4, 5],
+            "result": 52
+        }
+        ```
+    """
+    sandbox: PersistentContainerSandbox = app_state.get("sandbox")
+    if sandbox is None:
+        raise HTTPException(status_code=503, detail="Sandbox not initialized")
+
+    try:
+        # Import here to avoid circular dependency issues
+        from datamodels.sandbox import SandboxBaseArgs
+
+        # Get the Python state from the container (includes types and values)
+        state = await sandbox.list_files(ReadOperationsArgs(container_id=container_id, path=''))
+        return state
+
+    except ValueError as e:
+        # Container not found
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving Python state: {str(e)}"
         )
 
 

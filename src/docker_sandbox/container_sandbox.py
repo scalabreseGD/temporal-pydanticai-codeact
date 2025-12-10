@@ -34,8 +34,8 @@ from temporalio.common import WorkflowIDConflictPolicy
 from temporalio.exceptions import ApplicationError
 
 from datamodels.sandbox import StartContainerArgs, SandboxBaseArgs, ReadVariableInStateArgs, ExecutePythonArgs, \
-    ExecuteBashArgs, WriteFileArgs, ReadOperationsArgs, SandboxInputTask, SandboxTaskTypes, SandboxTaskArgsAdapter, \
-    InstallAdditionalPackagesArgs
+    ExecuteBashArgs, WriteFileArgs, SandboxInputTask, SandboxTaskTypes, SandboxTaskArgsAdapter, \
+    InstallAdditionalPackagesArgs, ReadOperationsArgs
 from .sandbox import SANDBOX_DIR, DOCKERFILE_PATH
 
 
@@ -667,10 +667,50 @@ class PersistentContainerSandbox:
                 "error": str(e)
             }
 
-    async def list_files(self, input_model: ReadOperationsArgs) -> Dict[str, Any]:
-        """List files in container directory"""
-        return await self.execute_bash(
-            input_model=ExecuteBashArgs(container_id=input_model.container_id, script=f"ls -la {input_model.path}"))
+    async def list_files(self, input_model: SandboxBaseArgs) -> Dict[str, Any]:
+        """List files in /output directory and return absolute paths"""
+        container = self._get_container_by_id(input_model.container_id)
+        if not container:
+            raise ValueError(f"Container {input_model.container_id} not found")
+
+        loop = asyncio.get_event_loop()
+
+        def _list():
+            # Use find to get absolute paths of files in /output
+            exit_code, output = container.exec_run(
+                cmd=["find", "/output", "-type", "f"],
+                stdout=True,
+                stderr=True,
+                demux=True
+            )
+
+            stdout, stderr = output
+            stdout_str = stdout.decode('utf-8') if stdout else ""
+            stderr_str = stderr.decode('utf-8') if stderr else ""
+
+            if exit_code == 0:
+                # Split output into list of file paths, filter out empty lines
+                file_paths = [path.strip() for path in stdout_str.split('\n') if path.strip()]
+                return {
+                    "success": True,
+                    "files": file_paths,
+                    "error": None
+                }
+            else:
+                return {
+                    "success": False,
+                    "files": [],
+                    "error": stderr_str
+                }
+
+        try:
+            return await loop.run_in_executor(self.executor, _list)  # type: ignore[arg-type]
+        except Exception as e:
+            return {
+                "success": False,
+                "files": [],
+                "error": str(e)
+            }
 
     async def get_container_info(self, input_model: SandboxBaseArgs) -> Dict[str, Any]:
         """Get information about the specified container"""
@@ -922,17 +962,18 @@ class DurablePersistentContainerSandbox(PersistentContainerSandbox):
         return await super().get_container_info(input_model)
 
     @activity.defn
-    async def list_files(self, input_model: ReadOperationsArgs) -> Dict[str, Any]:
+    async def list_files(self, input_model: SandboxBaseArgs) -> Dict[str, Any]:
         """
-        List files in a container directory.
+        List files in the /output directory with absolute paths.
 
-        Executes 'ls -la' in the specified directory and returns the output.
+        Returns a list of absolute file paths from the container's /output directory.
+        The path parameter in input_model is ignored - always lists from /output.
 
         Args:
-            input_model: Contains container_id and path (directory path to list).
+            input_model: Contains container_id. The path field is not used.
 
         Returns:
-            Dict[str, Any]: Result with 'success', 'output' (file listing), and 'error' fields.
+            Dict[str, Any]: Result with 'success', 'files' (list of absolute paths), and 'error' fields.
         """
         return await super().list_files(input_model)
 
