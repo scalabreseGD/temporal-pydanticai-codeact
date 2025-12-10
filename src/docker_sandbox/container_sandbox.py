@@ -387,7 +387,20 @@ class PersistentContainerSandbox:
             }
 
     async def get_python_state(self, input_model: SandboxBaseArgs) -> Dict[str, Any]:
-        """Get the current persisted Python state from a container"""
+        """
+        Get the current persisted Python state from a container.
+
+        Returns a dictionary mapping variable names to their type and value info.
+        Each variable entry contains:
+        - type: The variable's type name
+        - value: The variable's value (serialized for complex types)
+
+        Example return:
+            {
+                "x": {"type": "int", "value": 42},
+                "data": {"type": "list", "value": [1, 2, 3, 4, 5]}
+            }
+        """
         container = self._get_container_by_id(input_model.container_id)
         if not container:
             raise ValueError(f"Container {input_model.container_id} not found")
@@ -417,9 +430,9 @@ class PersistentContainerSandbox:
 
         if result["success"]:
             try:
-                import ast
-                return ast.literal_eval(result["output"].strip())
-            except:
+                # Parse JSON output from get_state.py
+                return json.loads(result["output"].strip())
+            except json.JSONDecodeError:
                 return {}
         return {}
 
@@ -1036,16 +1049,18 @@ class DurablePersistentContainerSandbox(PersistentContainerSandbox):
     @activity.defn
     async def get_python_state(self, input_model: SandboxBaseArgs) -> Dict[str, Any]:
         """
-        Get the complete persistent Python state as a dictionary.
+        Get the complete persistent Python state with types and values.
 
-        Retrieves all variables and their values from the container's
-        persistent state storage. Returns as a dictionary.
+        Retrieves all variables from the container's persistent state storage.
+        Returns a dictionary mapping variable names to objects containing both
+        the variable's type and value.
 
         Args:
             input_model: Container identifier with container_id field.
 
         Returns:
-            Dict[str, Any]: Dictionary containing all stored variables and their values.
+            Dict[str, Any]: Dictionary mapping variable names to objects with 'type' and 'value' fields.
+                Example: {"x": {"type": "int", "value": 42}, "data": {"type": "list", "value": [1, 2, 3]}}
         """
         return await super().get_python_state(input_model)
 

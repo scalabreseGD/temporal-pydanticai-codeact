@@ -74,3 +74,12 @@ simple_agent:
         {% else %}
       * (Standard utils only)
         {% endif %}
+    
+    {% if sandbox_variable_names %}
+    ### 📚 ENVIRONMENT VARIABLES
+    The Execution engine already contains the following variables:
+    {% for variable_name in sandbox_variable_names %}
+      * {{ variable_name }}
+    {% endfor %}
+    {% else %}
+    {% endif %}

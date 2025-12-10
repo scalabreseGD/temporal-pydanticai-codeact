@@ -6,16 +6,16 @@ code execution capabilities in isolated Docker containers. It integrates with
 StatelessPersistentSandbox to provide agents with tools for executing Python
 and bash code safely.
 """
-
 from datetime import timedelta
 
-from pydantic import BaseModel
 from pydantic_ai import RunContext
 from pydantic_ai._run_context import AgentDepsT
 from pydantic_ai.agent import EventStreamHandler, NoneType, Instructions
 from pydantic_ai.durable_exec.temporal import TemporalAgent
 from pydantic_ai.output import OutputSpec, OutputDataT
 from temporalio import workflow
+
+from datamodels.sandbox import SandboxBaseArgs
 
 with workflow.unsafe.imports_passed_through():
     from agents.base.base_agent import BaseAgent
@@ -61,21 +61,40 @@ class CodeActAgent(BaseAgent):
             The instruction template can reference dependency attributes via
             Jinja2 syntax (e.g., {{ container_id }}, {{ python_packages }}).
         """
+
         async def _instructions_cb(context: RunContext[AgentDepsT]):
-            dependencies: BaseModel = context.deps
-            if workflow.in_workflow():
-                original_instructions = await workflow.execute_activity(
-                    activity='render_jinja',
-                    args=[self._prompts.instructions or '',
-                          dependencies.model_dump()],
-                    start_to_close_timeout=timedelta(seconds=30),
-                )
-            else:
-                from activities.common import render_jinja
-                original_instructions = render_jinja(self._prompts.instructions or '', dependencies.model_dump())
-            return original_instructions
+            return await CodeActAgent._render_instructions(self._prompts.instructions or '', context.deps)
 
         return _instructions_cb
+
+    @staticmethod
+    async def _render_instructions(base_instruction: str, deps: CodeActAgentDeps):
+
+        # we always fetch the latest variable lists from the code sandbox
+        if workflow.in_workflow():
+            sandbox_variable_names = await workflow.execute_activity(
+                activity='list_state_variables',
+                arg=SandboxBaseArgs(container_id=deps.container_id),
+                start_to_close_timeout=timedelta(seconds=30),
+            )
+
+            deps_args = deps.model_dump()
+            deps_args['sandbox_variable_names'] = sandbox_variable_names
+
+            rendered_prompt = await workflow.execute_activity(
+                activity='render_jinja',
+                args=[base_instruction, deps_args],
+                start_to_close_timeout=timedelta(seconds=30),
+            )
+        else:
+            from activities.common import render_jinja
+            from docker_sandbox.container_sandbox import PersistentContainerSandbox
+            variables = await PersistentContainerSandbox().list_state_variables(
+                SandboxBaseArgs(container_id=deps.container_id))
+            deps_args = deps.model_dump()
+            deps_args['sandbox_variable_names'] = variables
+            rendered_prompt = render_jinja(base_instruction, deps_args)
+        return rendered_prompt
 
     async def _build_agent(self, agent_builder: AgentBuilder,
                            event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
