@@ -17,7 +17,7 @@ from typing import Optional, Dict, Any
 import docker
 from dotenv import load_dotenv, find_dotenv
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
 from temporalio.client import Client, WorkflowExecutionStatus
@@ -66,6 +66,19 @@ app = FastAPI(
     description="API for executing code tasks with CodeActAgent and downloading generated files",
     version="0.1.0"
 )
+
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    """
+    Serve the chat UI interface.
+
+    Returns:
+        HTML page with the interactive chat interface
+    """
+    template_path = Path(__file__).parent / "templates" / "chat.html"
+    with open(template_path, "r") as f:
+        return f.read()
 
 
 class ChatRequest(BaseModel):

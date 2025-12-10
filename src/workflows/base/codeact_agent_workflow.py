@@ -86,7 +86,7 @@ class CodeActAgentWorkflow:
                                                   timeout=timedelta(hours=1),
                                                   timeout_summary="Waiting for user input")
                     if not self.is_running:
-                        await self._stop_sandbox_container()
+                        continue
                 except asyncio.TimeoutError:
                     self.is_running = False
                     continue
