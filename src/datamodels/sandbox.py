@@ -74,10 +74,13 @@ class StartContainerArgs(BaseModel):
     Attributes:
         python_packages: List of Python packages to install via uv.
         system_packages: List of system packages to install via apt-get.
+        container_name: Optional custom name for the container. If not provided,
+            Docker will auto-generate a container ID.
         kind: Literal discriminator for union type resolution.
     """
     python_packages: Optional[List[str]] = Field(default=None, description="List of Python packages to install")
     system_packages: Optional[List[str]] = Field(default=None, description="List of system packages to install")
+    container_name: Optional[str] = Field(default=None, description="Optional custom name for the container")
     kind: Literal['start_container'] = Field(default='start_container')
     model_config = {'from_attributes': True}
 

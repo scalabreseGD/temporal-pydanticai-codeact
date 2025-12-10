@@ -70,6 +70,9 @@ class CodeActAgentWorkflow:
         Docker container. Installs requested packages and initializes persistent
         state. Sets self.container_id to the new container's ID.
 
+        The container is named using the workflow ID for easy tracking and
+        management across workflow executions.
+
         Args:
             python_packages: Optional list of Python packages to install via uv.
             system_packages: Optional list of system packages to install via apt-get.
@@ -89,7 +92,8 @@ class CodeActAgentWorkflow:
             activity=SandboxTaskTypes.START_CONTAINER,
             arg=StartContainerArgs(
                 python_packages=python_packages,
-                system_packages=system_packages
+                system_packages=system_packages,
+                container_name=workflow.info().workflow_id
             ),
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=RetryPolicy(

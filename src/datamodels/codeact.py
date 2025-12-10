@@ -50,3 +50,9 @@ class CodeActAgentDeps(BaseModel):
     system_packages: Optional[List[str]] = Field(default=None, description="List of system packages to install")
 
     model_config = {'from_attributes': True}
+
+
+class CodeActAgentOutput(BaseModel):
+    message: str = Field(description="Message returned by the agent.")
+    container_id: str = Field(description="Container identifier used for the computation")
+    file_paths: List[str] = Field(default_factory=list, description="List of file paths that the user can download.")

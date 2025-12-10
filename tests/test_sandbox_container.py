@@ -441,3 +441,26 @@ class TestPersistentContainerSandbox:
 
         with pytest.raises(Exception):
             await sandbox.stop_container(args)
+
+    @pytest.mark.asyncio
+    async def test_start_container_with_custom_name(self, sandbox, mock_docker_client):
+        """Test starting container with a custom name (e.g., workflow_id)."""
+        custom_name = "test-workflow-12345"
+
+        # Mock exec_run to return proper format for package installation
+        mock_container = mock_docker_client.containers.get.return_value
+        mock_container.exec_run.return_value = (0, (b"", b""))
+
+        args = StartContainerArgs(
+            python_packages=["numpy"],
+            container_name=custom_name
+        )
+
+        container_id = await sandbox.start_container(args)
+
+        # Should return the custom name instead of Docker's auto-generated ID
+        assert container_id == custom_name
+
+        # Verify containers.run was called with the name parameter
+        call_kwargs = mock_docker_client.containers.run.call_args[1]
+        assert call_kwargs.get('name') == custom_name

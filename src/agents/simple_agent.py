@@ -5,8 +5,9 @@ This module provides SimpleAgent, a minimal concrete implementation of
 CodeActAgent with all default settings. Use this for basic code execution
 tasks that don't require custom configuration.
 """
-
 from temporalio import workflow
+
+from datamodels.codeact import CodeActAgentOutput
 
 with workflow.unsafe.imports_passed_through():
     from agents.base.code_act_agent import CodeActAgent
@@ -36,3 +37,4 @@ class SimpleAgent(CodeActAgent):
         ```
     """
     agent_name = 'simple_agent'
+    output_type = CodeActAgentOutput

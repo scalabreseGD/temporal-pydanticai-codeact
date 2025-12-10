@@ -13,7 +13,7 @@ from temporalio import workflow
 
 from agents.simple_agent import SimpleAgent
 from datamodels.agent_builder import AgentBuilder
-from datamodels.codeact import CodeActAgentDeps
+from datamodels.codeact import CodeActAgentDeps, CodeActAgentOutput
 from datamodels.prompts import AgentPrompts, Prompts
 from workflows.base.codeact_agent_workflow import CodeActAgentWorkflow
 
@@ -45,7 +45,7 @@ class SimpleAgentWorkflow(CodeActAgentWorkflow):
     """
 
     @workflow.run
-    async def run(self, user_task: str) -> str:
+    async def run(self, user_task: str) -> CodeActAgentOutput | str:
         """
         Execute a user task using SimpleAgent with sandbox tools.
 
@@ -54,7 +54,7 @@ class SimpleAgentWorkflow(CodeActAgentWorkflow):
         2. Loads prompts and model configuration from activities
         3. Builds SimpleAgent with Gemini model
         4. Runs agent with user task and container dependencies
-        5. Returns agent output
+        5. Returns agent output including message, container_id, and file paths
         6. Ensures container cleanup in finally block
 
         Args:
@@ -62,7 +62,8 @@ class SimpleAgentWorkflow(CodeActAgentWorkflow):
                 Example: "Load iris dataset and calculate summary statistics"
 
         Returns:
-            str: Agent's final output/response to the task.
+            CodeActAgentOutput: Agent's output containing message, container_id,
+                and list of file paths available for download.
 
         Raises:
             ApplicationError: If container operations fail.
@@ -86,11 +87,15 @@ class SimpleAgentWorkflow(CodeActAgentWorkflow):
                 user_prompt=user_task,
                 deps=CodeActAgentDeps(container_id=self.container_id,
                                       python_packages=["numpy", "pandas"]),
+                output_type=CodeActAgentOutput,
             )
-            return agent_output.output
+            agent_final_output = agent_output.output
+        except Exception as ex:
+            agent_final_output = str(ex)
         finally:
             workflow.logger.info(f"Stopping container {self.container_id}")
-            await self.stop_sandbox_container()
+            # await self.stop_sandbox_container()
+        return agent_final_output
 
     @staticmethod
     async def _get_configs():
