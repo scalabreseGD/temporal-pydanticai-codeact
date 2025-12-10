@@ -6,7 +6,6 @@ through Temporal workflows. It exposes endpoints for:
 - Executing agent tasks with code execution
 - Downloading generated files from agent executions
 """
-
 import asyncio
 import io
 import os
@@ -21,11 +20,11 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
+from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.common import WorkflowIDConflictPolicy
 
 from activities.common import load_config, get_temporal_client, create_unique_id
 from datamodels.codeact import CodeActAgentOutput
-from datamodels.sandbox import ReadOperationsArgs
 from docker_sandbox.container_sandbox import PersistentContainerSandbox
 
 load_dotenv(find_dotenv())
@@ -72,6 +71,8 @@ app = FastAPI(
 class ChatRequest(BaseModel):
     """Request model for the chat endpoint."""
     task: str = Field(..., description="User task description for the agent to execute")
+    workflow_id: Optional[str] = Field(default=None,
+                                       description="Workflow ID representing the open workflow for the agent")
 
 
 class ChatResponse(BaseModel):
@@ -109,24 +110,38 @@ async def chat(request: ChatRequest) -> ChatResponse:
         }
         ```
     """
-    temporal_client = app_state.get("temporal_client")
+    temporal_client: Client = app_state.get("temporal_client")
     if temporal_client is None:
         raise HTTPException(status_code=503, detail="Temporal client not initialized")
 
     # Generate workflow ID if not provided
-    workflow_id = f"chat-{create_unique_id(request.task)}"
     task_queue = os.getenv('TASK_QUEUE', 'sample_queue')
 
     try:
-        # Execute the workflow
-        result = await temporal_client.execute_workflow(
-            'SimpleAgentWorkflow',
-            id=workflow_id,
-            task_queue=task_queue,
-            arg=request.task,
-            id_conflict_policy=WorkflowIDConflictPolicy.TERMINATE_EXISTING,
-            result_type=CodeActAgentOutput
-        )
+
+        if request.workflow_id:
+            workflow_id = request.workflow_id
+            workflow_handle = temporal_client.get_workflow_handle(workflow_id=workflow_id)
+
+            desc = await workflow_handle.describe()
+            if desc.status == WorkflowExecutionStatus.RUNNING:
+                await workflow_handle.signal(signal='send_user_task', arg=request.task)
+        else:
+            workflow_id = f"chat-{create_unique_id(request.task)}"
+            workflow_handle = await temporal_client.start_workflow(
+                'SimpleAgentWorkflow',
+                id=workflow_id,
+                task_queue=task_queue,
+                id_conflict_policy=WorkflowIDConflictPolicy.TERMINATE_EXISTING,
+                result_type=str,
+                start_signal='send_user_task',
+                start_signal_args=[request.task],
+            )
+        result = None
+        while not result:
+            result = await workflow_handle.query(query='agent_output', result_type=Optional[CodeActAgentOutput | str])
+            if not result:
+                await asyncio.sleep(1)
 
         # Return the agent output
         return ChatResponse(
@@ -142,8 +157,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 @app.get("/download_file")
 async def download_file(
-    container_id: str = Query(..., description="Container ID where the file is located"),
-    file_path: str = Query(..., description="Path to the file within the container")
+        container_id: str = Query(..., description="Container ID where the file is located"),
+        file_path: str = Query(..., description="Path to the file within the container")
 ):
     """
     Download a file from a Docker container.
@@ -248,62 +263,6 @@ async def download_file(
         )
 
 
-@app.get("/get_python_state")
-async def get_python_state(
-    container_id: str = Query(..., description="Container ID or workflow ID to get state from")
-):
-    """
-    Get the persistent Python state from a container.
-
-    This endpoint retrieves all variables stored in a container's persistent
-    state. Variables are maintained across code executions within the same
-    container.
-
-    Args:
-        container_id: ID or name of the container (can be workflow_id)
-
-    Returns:
-        Dictionary containing all persisted variables and their values
-
-    Raises:
-        HTTPException: If container not found or state retrieval fails
-
-    Example:
-        ```
-        GET /get_python_state?container_id=chat-abc123
-        ```
-
-        Response:
-        ```json
-        {
-            "x": 42,
-            "data": [1, 2, 3, 4, 5],
-            "result": 52
-        }
-        ```
-    """
-    sandbox: PersistentContainerSandbox = app_state.get("sandbox")
-    if sandbox is None:
-        raise HTTPException(status_code=503, detail="Sandbox not initialized")
-
-    try:
-        # Import here to avoid circular dependency issues
-        from datamodels.sandbox import SandboxBaseArgs
-
-        # Get the Python state from the container (includes types and values)
-        state = await sandbox.list_files(ReadOperationsArgs(container_id=container_id, path=''))
-        return state
-
-    except ValueError as e:
-        # Container not found
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error retrieving Python state: {str(e)}"
-        )
-
-
 @app.get("/health")
 async def health():
     """
@@ -317,7 +276,6 @@ async def health():
         "temporal_connected": app_state.get("temporal_client") is not None,
         "sandbox_initialized": app_state.get("sandbox") is not None
     }
-
 
 # if __name__ == "__main__":
 #     import uvicorn
