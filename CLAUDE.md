@@ -4,10 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Python project named **code-act-pydanticai**, focused on building agents with code execution capabilities using:
+This is a Python library named **temporal.pydanticai.codeact**, a reusable package for building agents with code execution capabilities using:
 - **PydanticAI** (v1.27.0) - Anthropic's agent framework for building production-grade GenAI applications
 - **Temporal** (v1.19.0) - Workflow orchestration for reliable, long-running processes
 - **Docker Python Client** (v7.1.0) - Programmatic Docker container management
+
+The library is structured as a proper Python package under the namespace `temporal.pydanticai.codeact`.
 
 ## Environment Setup
 
@@ -46,30 +48,142 @@ uv add <package-name>
 
 ### Development Workflow
 ```bash
-# Run tests (when test suite is added)
+# Run all tests
 pytest
 
-# Run a single test file
-pytest tests/test_<filename>.py
+# Run tests from specific module
+pytest tests/temporal/pydanticai/codeact/test_datamodels_codeact.py
 
 # Run with verbose output
 pytest -v
 
-# Type checking (when mypy is added)
-mypy .
+# Run only unit tests (no Docker/Temporal required)
+pytest -m unit
 
-# Linting (when ruff is added)
+# Type checking
+mypy src/
+
+# Linting
 ruff check .
 
 # Auto-fix linting issues
 ruff check --fix .
 ```
 
-## Architecture Notes
+## Package Structure
 
-**Current State**: This is a newly initialized project with minimal structure. As the codebase develops, this section should be updated with:
+The library is organized under the namespace `temporal.pydanticai.codeact`:
 
-- Core agent architecture and how PydanticAI is integrated
-- Key modules and their responsibilities
-- Data flow patterns
-- Integration points with external services or APIs
+```
+src/
+└── temporal/
+    └── pydanticai/
+        └── codeact/
+            ├── __init__.py             # Package exports
+            ├── activities/             # Temporal activities (config loading, utilities)
+            ├── agents/                 # PydanticAI agent implementations
+            │   ├── base/
+            │   │   ├── base_agent.py         # Abstract base agent
+            │   │   ├── code_act_agent.py     # Code execution agent
+            │   │   └── default_settings.py   # Temporal activity configs
+            │   └── simple_agent.py           # Concrete agent example
+            ├── api/                    # FastAPI application
+            ├── datamodels/             # Pydantic models for all data structures
+            ├── docker_sandbox/         # Docker container sandbox implementations
+            ├── workflows/              # Temporal workflow definitions
+            └── workers/                # Temporal worker configurations
+                └── sandbox_worker.py   # CodeActWorkerRunner class
+```
+
+Tests mirror the source structure:
+```
+tests/
+└── temporal/
+    └── pydanticai/
+        └── codeact/
+            ├── test_activities_common.py
+            ├── test_datamodels_*.py
+            └── test_sandbox_container.py
+```
+
+## Import Patterns
+
+Always use fully qualified imports from the `temporal.pydanticai.codeact` namespace:
+
+```python
+# Agents
+from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
+from temporal.pydanticai.codeact.agents.base.code_act_agent import CodeActAgent
+
+# Data models
+from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
+from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentDeps
+from temporal.pydanticai.codeact.datamodels.sandbox import ExecutePythonArgs
+
+# Workflows
+from temporal.pydanticai.codeact.workflows.simple_agent_workflow import SimpleAgentWorkflow
+
+# Activities and utilities
+from temporal.pydanticai.codeact.activities.common import load_config, get_temporal_client
+
+# Workers
+from temporal.pydanticai.codeact.workers.sandbox_worker import CodeActWorkerRunner
+```
+
+## Architecture Overview
+
+### Three-Layer Architecture
+
+1. **Agent Layer** - PydanticAI agents with tool definitions
+   - `BaseAgent`: Abstract base with model configuration
+   - `CodeActAgent`: Code execution agent with sandbox tools
+   - `SimpleAgent`: Concrete implementation example
+
+2. **Workflow Layer** - Temporal workflows for orchestration
+   - `CodeActAgentWorkflow`: Mixin for container lifecycle management
+   - `SimpleAgentWorkflow`: Complete agent workflow example
+   - `SandboxWorkflow`: Individual sandbox operation workflow
+
+3. **Sandbox Layer** - Docker container execution
+   - `PersistentContainerSandbox`: Core container operations
+   - `DurablePersistentContainerSandbox`: Temporal activities wrapper
+   - `StatelessPersistentSandbox`: Agent tool adapter
+
+### Key Components
+
+- **Workers**: Use `CodeActWorkerRunner` to create flexible workers that support multiple agents and workflows
+- **State Management**: Python variables persist across executions using pickle serialization
+- **Tool Instrumentation**: Sandbox operations automatically become agent tools
+- **Durable Execution**: Temporal ensures reliability with retries and recovery
+
+## Common Patterns
+
+### Creating a Worker
+
+```python
+from temporal.pydanticai.codeact.workers.sandbox_worker import CodeActWorkerRunner
+from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
+
+worker = await CodeActWorkerRunner.from_args(
+    temporal_client=client,
+    task_queue='my-queue',
+    agents=[agent],
+    workflows=[MyWorkflow],
+    activities=[my_custom_activity]  # Optional
+)
+await worker.run()
+```
+
+### Building an Agent
+
+```python
+from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
+from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
+
+agent = await SimpleAgent.from_agent_confs(
+    agent_builder=AgentBuilder(
+        prompts=prompts,
+        model_configs=model_configs
+    )
+)
+```

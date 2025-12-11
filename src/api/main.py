@@ -23,9 +23,9 @@ from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
 from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.common import WorkflowIDConflictPolicy
 
-from activities.common import load_config, get_temporal_client, create_unique_id
-from datamodels.codeact import CodeActAgentOutput
-from docker_sandbox.container_sandbox import PersistentContainerSandbox
+from temporal.pydanticai.codeact.activities.common import load_config, get_temporal_client, create_unique_id
+from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentOutput
+from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import PersistentContainerSandbox
 
 load_dotenv(find_dotenv())
 

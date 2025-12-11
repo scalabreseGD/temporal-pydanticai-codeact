@@ -1,13 +1,13 @@
-# Code Act PydanticAI
+# temporal.pydanticai.codeact
 
 ![Python](https://img.shields.io/badge/python-3.13+-blue.svg)
-![License](https://img.shields.io/badge/license-TBD-lightgrey.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-Building intelligent agents with safe code execution capabilities using PydanticAI, Temporal workflows, and Docker sandboxes.
+A reusable library for building intelligent agents with safe code execution capabilities using PydanticAI, Temporal workflows, and Docker sandboxes.
 
 ## Overview
 
-**Code Act PydanticAI** combines three powerful technologies to create AI agents that can write and execute code safely in isolated environments with persistent state:
+**temporal.pydanticai.codeact** is a Python library that combines three powerful technologies to create AI agents that can write and execute code safely in isolated environments with persistent state:
 
 - **[PydanticAI](https://ai.pydantic.dev/)** (v1.27.0+) - Type-safe agent framework from Anthropic for building production-grade GenAI applications
 - **[Temporal](https://temporal.io/)** (v1.19.0+) - Workflow orchestration for reliable, durable, long-running agent processes
@@ -34,13 +34,46 @@ Building intelligent agents with safe code execution capabilities using Pydantic
 
 ### Installation
 
+#### For Library Users (Using in Your Project)
+
+Install the published library in your project:
+
 ```bash
-# Clone the repository
+# Install from PyPI (when published)
+pip install temporal-pydanticai-codeact
+
+# Or with uv
+uv add temporal-pydanticai-codeact
+
+# Or with poetry
+poetry add temporal-pydanticai-codeact
+```
+
+Then use it in your code:
+
+```python
+from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
+from temporal.pydanticai.codeact.workers.sandbox_worker import CodeActWorkerRunner
+from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
+
+# Your code here...
+```
+
+#### For Contributors (Development Setup)
+
+```bash
+# Clone and install for development
 git clone https://github.com/yourusername/code-act-pydanticai.git
 cd code-act-pydanticai
 
-# Install dependencies
+# Install with uv (recommended)
 uv sync
+
+# Or install in editable mode with pip
+pip install -e .
+
+# Install with dev dependencies
+pip install -e ".[dev]"
 ```
 
 ### Configuration
@@ -72,7 +105,10 @@ simple_agent:
 
 ```python
 import asyncio
-from activities.common import load_config, get_temporal_client
+from temporal.pydanticai.codeact.activities.common import load_config, get_temporal_client
+from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
+from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
+from temporal.pydanticai.codeact.workflows.simple_agent_workflow import SimpleAgentWorkflow
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
 
 async def main():
@@ -85,8 +121,7 @@ async def main():
 
     # Execute workflow
     result = await client.execute_workflow(
-        'SimpleAgentWorkflow',
-        arg='Calculate the mean and standard deviation of [1, 2, 3, 4, 5]',
+        SimpleAgentWorkflow.run,
         id='my-agent-task',
         task_queue='sample_queue'
     )
@@ -128,25 +163,32 @@ The project uses a three-layer architecture:
 
 ## Core Components
 
-### Agents (`src/agents/`)
+### Agents (`temporal.pydanticai.codeact.agents`)
 
 - **`BaseAgent`** - Abstract base class with model configuration, MCP toolsets, and Temporal wrapping
 - **`CodeActAgent`** - Code execution agent with Docker sandbox tools (blacklists container lifecycle ops)
 - **`SimpleAgent`** - Minimal concrete implementation for basic code execution tasks
 
-### Workflows (`src/workflows/`)
+### Workflows (`temporal.pydanticai.codeact.workflows`)
 
 - **`CodeActAgentWorkflow`** - Mixin providing container lifecycle management (start/stop)
 - **`SimpleAgentWorkflow`** - Complete example workflow: start container → run agent → cleanup
 - **`SandboxWorkflow`** - Lightweight child workflow for individual sandbox operations
 
-### Docker Sandbox (`src/docker_sandbox/`)
+### Docker Sandbox (`temporal.pydanticai.codeact.docker_sandbox`)
 
 - **`PersistentContainerSandbox`** - Core implementation with container management and state persistence
 - **`DurablePersistentContainerSandbox`** - Wraps all methods as Temporal activities
 - **`StatelessPersistentSandbox`** - Converts activities into PydanticAI agent tools via child workflows
 
-### Data Models (`src/datamodels/`)
+### Workers (`temporal.pydanticai.codeact.workers`)
+
+- **`CodeActWorkerRunner`** - Flexible worker builder for running agents with custom workflows and activities
+  - Supports multiple agents with AgentPlugin
+  - Automatically includes sandbox activities and utilities
+  - Extensible with custom workflows and activities
+
+### Data Models (`temporal.pydanticai.codeact.datamodels`)
 
 - **`sandbox.py`** - All sandbox task types and argument models (15+ operations)
 - **`codeact.py`** - `CodeActAgentDeps` for runtime container context
@@ -158,49 +200,66 @@ The project uses a three-layer architecture:
 ```
 code-act-pydanticai/
 ├── src/
-│   ├── agents/              # AI agent implementations
-│   │   ├── base/
-│   │   │   ├── base_agent.py         # Abstract base agent
-│   │   │   ├── code_act_agent.py     # Code execution agent
-│   │   │   └── default_settings.py   # Temporal activity configs
-│   │   └── simple_agent.py           # Basic concrete agent
-│   │
-│   ├── workflows/           # Temporal workflow definitions
-│   │   ├── base/
-│   │   │   └── codeact_agent_workflow.py  # Container lifecycle mixin
-│   │   ├── simple_agent_workflow.py       # Example agent workflow
-│   │   └── sandbox_workflow.py            # Sandbox operation workflow
-│   │
-│   ├── docker_sandbox/      # Docker execution sandbox
-│   │   ├── container_sandbox.py      # 3 sandbox implementations
-│   │   └── sandbox/                  # State management scripts
-│   │       ├── init_state.py
-│   │       ├── load_state.py
-│   │       ├── save_state.py
-│   │       ├── get_state.py
-│   │       ├── list_variables.py
-│   │       ├── read_variable.py
-│   │       └── clear_state.py
-│   │
-│   ├── datamodels/          # Pydantic data models
-│   │   ├── sandbox.py       # Sandbox task models
-│   │   ├── codeact.py       # Agent dependencies
-│   │   ├── agent_builder.py # Agent configuration
-│   │   └── prompts.py       # Prompt models
-│   │
-│   ├── activities/          # Temporal activity functions
-│   │   └── common.py        # Config loading, prompts, utilities
-│   │
-│   ├── workers/             # Temporal workers
-│   │   └── sandbox_worker.py
-│   │
-│   └── run_sandbox_workflow.py  # Demo runner script
+│   └── temporal/
+│       └── pydanticai/
+│           └── codeact/                    # Main library package
+│               ├── __init__.py             # Package exports
+│               │
+│               ├── agents/                 # AI agent implementations
+│               │   ├── base/
+│               │   │   ├── base_agent.py         # Abstract base agent
+│               │   │   ├── code_act_agent.py     # Code execution agent
+│               │   │   └── default_settings.py   # Temporal activity configs
+│               │   └── simple_agent.py           # Basic concrete agent
+│               │
+│               ├── workflows/              # Temporal workflow definitions
+│               │   ├── base/
+│               │   │   └── codeact_agent_workflow.py  # Container lifecycle mixin
+│               │   ├── simple_agent_workflow.py       # Example agent workflow
+│               │   └── sandbox_workflow.py            # Sandbox operation workflow
+│               │
+│               ├── docker_sandbox/         # Docker execution sandbox
+│               │   ├── container_sandbox.py      # 3 sandbox implementations
+│               │   └── sandbox/                  # State management scripts
+│               │       ├── init_state.py
+│               │       ├── load_state.py
+│               │       ├── save_state.py
+│               │       ├── get_state.py
+│               │       ├── list_variables.py
+│               │       ├── read_variable.py
+│               │       └── clear_state.py
+│               │
+│               ├── datamodels/             # Pydantic data models
+│               │   ├── sandbox.py       # Sandbox task models
+│               │   ├── codeact.py       # Agent dependencies
+│               │   ├── agent_builder.py # Agent configuration
+│               │   └── prompts.py       # Prompt models
+│               │
+│               ├── activities/             # Temporal activity functions
+│               │   └── common.py        # Config loading, prompts, utilities
+│               │
+│               ├── workers/                # Temporal workers
+│               │   └── sandbox_worker.py   # CodeActWorkerRunner
+│               │
+│               └── api/                    # FastAPI application
+│                   └── main.py
 │
-├── examples/                # Usage examples
+├── tests/                              # Test suite (mirrors src structure)
+│   └── temporal/
+│       └── pydanticai/
+│           └── codeact/
+│               ├── test_activities_common.py
+│               ├── test_datamodels_agent_builder.py
+│               ├── test_datamodels_codeact.py
+│               ├── test_datamodels_prompts.py
+│               ├── test_datamodels_sandbox.py
+│               └── test_sandbox_container.py
+│
+├── examples/                           # Usage examples
 │   ├── simple_agent_example.py
 │   └── agent_with_sandbox_tools.py
 │
-├── docs/                    # Documentation
+├── docs/                               # Documentation
 │   ├── architecture.md
 │   ├── getting-started.md
 │   ├── api-reference.md
@@ -208,11 +267,10 @@ code-act-pydanticai/
 │   ├── examples.md
 │   └── sandbox_workflow_demo.md
 │
-├── tests/                   # Test suite
-├── app_conf.yml             # Temporal and LLM configuration
-├── agent_prompts.yml        # Agent prompts and instructions
-├── pyproject.toml           # Project dependencies
-├── CLAUDE.md                # Claude Code instructions
+├── app_conf.yml                        # Temporal and LLM configuration
+├── agent_prompts.yml                   # Agent prompts and instructions
+├── pyproject.toml                      # Project dependencies
+├── CLAUDE.md                           # Claude Code instructions
 └── README.md
 ```
 
@@ -228,11 +286,56 @@ brew install temporal  # macOS
 temporal server start-dev
 ```
 
-### 2. Start Worker
+### 2. Create and Start Worker
 
+Create a worker script (e.g., `my_worker.py`):
+
+```python
+import asyncio
+import os
+from temporal.pydanticai.codeact.workers.sandbox_worker import CodeActWorkerRunner
+from temporal.pydanticai.codeact.activities.common import load_config, get_temporal_client, read_prompts
+from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
+from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
+from temporal.pydanticai.codeact.workflows.simple_agent_workflow import SimpleAgentWorkflow
+from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
+
+async def main():
+    # Load configuration
+    config = load_config()
+    prompts = read_prompts()
+
+    # Create temporal client
+    client = await get_temporal_client(
+        config['temporal'],
+        plugins=[PydanticAIPlugin()]
+    )
+
+    # Build agents
+    agent = await SimpleAgent.from_agent_confs(
+        agent_builder=AgentBuilder(
+            prompts=prompts.agent_prompts,
+            model_configs=config['llm']['gemini']
+        )
+    )
+
+    # Create and run worker
+    worker = await CodeActWorkerRunner.from_args(
+        temporal_client=client,
+        task_queue=os.getenv('TASK_QUEUE', 'sample_queue'),
+        agents=[agent],
+        workflows=[SimpleAgentWorkflow]
+    )
+
+    await worker.run()
+
+if __name__ == '__main__':
+    asyncio.run(main())
+```
+
+Run the worker:
 ```bash
-cd src
-python workers/sandbox_worker.py
+python my_worker.py
 ```
 
 ### 3. Execute Workflow
@@ -300,6 +403,11 @@ ruff check --fix .
 The sandbox maintains Python variable state across executions using pickle serialization:
 
 ```python
+from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import PersistentContainerSandbox
+from temporal.pydanticai.codeact.datamodels.sandbox import ExecutePythonArgs
+
+sandbox = PersistentContainerSandbox()
+
 # First execution
 result = await sandbox.execute_python(
     ExecutePythonArgs(
@@ -322,11 +430,16 @@ result = await sandbox.execute_python(
 Workflows orchestrate long-running agent tasks with automatic retries:
 
 ```python
+from temporalio import workflow
+from temporal.pydanticai.codeact.workflows.base.codeact_agent_workflow import CodeActAgentWorkflow
+from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
+from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentDeps
+
 @workflow.defn
 class SimpleAgentWorkflow(CodeActAgentWorkflow):
     @workflow.run
     async def run(self, user_task: str) -> str:
-        await self.start_sandbox_container(python_packages=['numpy'])
+        await self._start_sandbox_container(python_packages=['numpy'])
         try:
             agent = await SimpleAgent.from_agent_confs(builder)
             result = await agent.run(
@@ -335,7 +448,7 @@ class SimpleAgentWorkflow(CodeActAgentWorkflow):
             )
             return result.output
         finally:
-            await self.stop_sandbox_container()  # Always cleanup
+            await self._stop_sandbox_container()  # Always cleanup
 ```
 
 ### Agent Tools
@@ -343,6 +456,8 @@ class SimpleAgentWorkflow(CodeActAgentWorkflow):
 Agents automatically receive sandbox operations as tools:
 
 ```python
+from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import StatelessPersistentSandbox
+
 # StatelessPersistentSandbox converts activities to agent tools
 sandbox = StatelessPersistentSandbox()
 agent = await sandbox.instrument_agent(
@@ -387,6 +502,161 @@ pytest tests/test_datamodels_sandbox.py
 
 See [Testing Guide](docs/testing.md) for comprehensive testing documentation.
 
+## Publishing the Library
+
+### Building the Distribution
+
+The library is configured to package only the `temporal` namespace module. To build distribution packages:
+
+```bash
+# Build the package using uv (recommended for this project)
+uv build
+
+# Or using standard build tools
+pip install build twine
+python -m build
+
+# This creates:
+# - dist/temporal_pydanticai_codeact-0.1.0-py3-none-any.whl (wheel - this is what gets installed)
+# - dist/temporal-pydanticai-codeact-0.1.0.tar.gz (source distribution)
+```
+
+**Verify the build:**
+```bash
+# Check what's in the wheel (what users will install)
+unzip -l dist/temporal_pydanticai_codeact-0.1.0-py3-none-any.whl | grep temporal
+
+# You should see only:
+# temporal/__init__.py
+# temporal/pydanticai/__init__.py
+# temporal/pydanticai/codeact/...
+```
+
+### What Gets Published
+
+The build process packages **only** the `src/temporal/` directory, which contains:
+- `temporal/__init__.py` (namespace package)
+- `temporal/pydanticai/__init__.py` (namespace package)
+- `temporal/pydanticai/codeact/` (the actual library code)
+
+This means users installing the package get:
+```
+site-packages/
+└── temporal/
+    └── pydanticai/
+        └── codeact/
+            ├── __init__.py
+            ├── activities/
+            ├── agents/
+            ├── datamodels/
+            ├── docker_sandbox/
+            ├── workflows/
+            └── workers/
+```
+
+### Publishing to PyPI
+
+```bash
+# Check the built package
+twine check dist/*
+
+# Upload to Test PyPI first (recommended)
+twine upload --repository testpypi dist/*
+
+# Test installation from TestPyPI
+pip install --index-url https://test.pypi.org/simple/ temporal-pydanticai-codeact
+
+# If everything works, publish to PyPI
+twine upload dist/*
+```
+
+### Publishing to Private Registry
+
+For private use or internal projects:
+
+```bash
+# Configure your private registry
+pip config set global.index-url https://your-registry.com/simple/
+
+# Upload to private registry
+twine upload --repository-url https://your-registry.com/legacy/ dist/*
+```
+
+### Using in Other Projects
+
+After publishing, users can install and use the library:
+
+**Example Project Structure:**
+```
+my-agent-project/
+├── pyproject.toml
+├── requirements.txt
+└── main.py
+```
+
+**requirements.txt:**
+```txt
+temporal-pydanticai-codeact>=0.1.0
+```
+
+**main.py:**
+```python
+import asyncio
+import os
+from temporal.pydanticai.codeact.workers.sandbox_worker import CodeActWorkerRunner
+from temporal.pydanticai.codeact.activities.common import (
+    load_config,
+    get_temporal_client,
+    read_prompts
+)
+from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
+from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
+from temporal.pydanticai.codeact.workflows.simple_agent_workflow import SimpleAgentWorkflow
+from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
+
+async def main():
+    # Load configuration
+    config = load_config()  # Looks for app_conf.yml in current directory
+    prompts = read_prompts()  # Looks for agent_prompts.yml
+
+    # Connect to Temporal
+    client = await get_temporal_client(
+        config['temporal'],
+        plugins=[PydanticAIPlugin()]
+    )
+
+    # Build agent
+    agent = await SimpleAgent.from_agent_confs(
+        agent_builder=AgentBuilder(
+            prompts=prompts.agent_prompts,
+            model_configs=config['llm']['gemini']
+        )
+    )
+
+    # Create and run worker
+    worker = await CodeActWorkerRunner.from_args(
+        temporal_client=client,
+        task_queue=os.getenv('TASK_QUEUE', 'my-queue'),
+        agents=[agent],
+        workflows=[SimpleAgentWorkflow]
+    )
+
+    print("Worker started. Press Ctrl+C to stop.")
+    await worker.run()
+
+if __name__ == '__main__':
+    asyncio.run(main())
+```
+
+**Install and run:**
+```bash
+# Install dependencies (includes temporal-pydanticai-codeact)
+pip install -r requirements.txt
+
+# Run your agent
+python main.py
+```
+
 ## Contributing
 
 Contributions are welcome! Please ensure:
@@ -400,7 +670,7 @@ Contributions are welcome! Please ensure:
 
 ## License
 
-TBD
+MIT
 
 ## Acknowledgments
 

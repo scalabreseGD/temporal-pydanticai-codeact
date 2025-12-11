@@ -1,18 +1,24 @@
 [project]
-name = "code-act-pydanticai"
+name = "temporal-pydanticai-codeact"
 version = "0.1.0"
-description = "Building agents with code execution capabilities using PydanticAI, Temporal, and Docker"
+description = "A reusable library for building AI agents with safe code execution using PydanticAI, Temporal, and Docker"
 readme = "README.md"
 requires-python = ">=3.13"
+license = { text = "MIT" }
 authors = [
     { name = "Your Name", email = "your.email@example.com" }
 ]
+keywords = ["pydantic-ai", "temporal", "docker", "agents", "code-execution", "sandbox"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
 dependencies = [
     "docker>=7.1.0",
     "fastapi>=0.124.0",
@@ -22,6 +28,12 @@ dependencies = [
     "temporalio>=1.19.0",
     "uvicorn[standard]>=0.38.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/code-act-pydanticai"
+Documentation = "https://github.com/yourusername/code-act-pydanticai/tree/main/docs"
+Repository = "https://github.com/yourusername/code-act-pydanticai"
+Issues = "https://github.com/yourusername/code-act-pydanticai/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -36,10 +48,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/temporal"]
 artifacts = [
-    "src/docker_sandbox/sandbox/*.py",
-    "src/docker_sandbox/sandbox/Dockerfile.pythonuv",
+    "src/temporal/pydanticai/codeact/docker_sandbox/sandbox/*.py",
+    "src/temporal/pydanticai/codeact/docker_sandbox/sandbox/Dockerfile.pythonuv",
 ]
 
 [dependency-groups]
