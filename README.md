@@ -63,8 +63,8 @@ from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
 
 ```bash
 # Clone and install for development
-git clone https://github.com/yourusername/code-act-pydanticai.git
-cd code-act-pydanticai
+git clone https://github.com/scalabreseGD/temporal-pydanticai-codeact.git
+cd temporal-pydanticai-codeact
 
 # Install with uv (recommended)
 uv sync

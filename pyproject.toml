@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "Simon Calabrese", email = "scalabrese@griddynamics.com" }
 ]
 keywords = ["pydantic-ai", "temporal", "docker", "agents", "code-execution", "sandbox"]
 classifiers = [
@@ -30,10 +30,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/code-act-pydanticai"
-Documentation = "https://github.com/yourusername/code-act-pydanticai/tree/main/docs"
-Repository = "https://github.com/yourusername/code-act-pydanticai"
-Issues = "https://github.com/yourusername/code-act-pydanticai/issues"
+Homepage = "https://github.com/scalabreseGD/temporal-pydanticai-codeact"
+Documentation = "https://github.com/scalabreseGD/temporal-pydanticai-codeact/tree/main/docs"
+Repository = "https://github.com/scalabreseGD/temporal-pydanticai-codeact"
+Issues = "https://github.com/scalabreseGD/temporal-pydanticai-codeact/issues"
 
 [project.optional-dependencies]
 dev = [
