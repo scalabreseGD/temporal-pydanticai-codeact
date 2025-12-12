@@ -15,12 +15,13 @@ A reusable library for building intelligent agents with safe code execution capa
 
 ### Key Features
 
-✨ **Persistent State Execution** - Variables persist across multiple code executions within the same session
+✨ **Crash-Resistant Persistence** - Docker volumes ensure Python variables and files survive crashes and restarts
 🔒 **Sandboxed Security** - All code runs in isolated Docker containers with resource limits
 🔄 **Durable Workflows** - Temporal ensures reliable execution with automatic retries and recovery
 🎯 **Type-Safe** - Full Pydantic validation for all inputs and outputs
 🛠️ **Flexible Tools** - Agents can execute Python, run bash commands, manage files, and query state
 📦 **Dynamic Packages** - Install Python and system packages on-demand during execution
+🌐 **Multi-Host Support** - Optional NFS volumes for shared state across multiple workers
 🎨 **Extensible Design** - Easy to create custom agents with specialized capabilities
 
 ## Quick Start
@@ -158,6 +159,12 @@ The project uses a three-layer architecture:
 ┌──────────────────────▼──────────────────────────────────────┐
 │                 Docker Container                            │
 │  Python 3.11 + uv + persistent state storage                │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────────┐
+│              Docker Volume (Persistent Storage)             │
+│  workflow-{id} volume at /persistent-storage/               │
+│  Stores Python state and files (survives crashes)           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -400,7 +407,7 @@ ruff check --fix .
 
 ### Persistent State
 
-The sandbox maintains Python variable state across executions using pickle serialization:
+The sandbox maintains Python variable state across executions using pickle serialization. Variables are stored in Docker volumes, ensuring they survive container crashes, worker restarts, and even Docker daemon restarts.
 
 ```python
 from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import PersistentContainerSandbox
@@ -424,6 +431,8 @@ result = await sandbox.execute_python(
     )
 )
 ```
+
+**For comprehensive documentation on persistence, volume management, multi-host deployments, and troubleshooting, see the [Persistent Storage](#persistent-storage) section.**
 
 ### Temporal Workflows
 
@@ -468,12 +477,194 @@ agent = await sandbox.instrument_agent(
 # Agent can now call: execute_python, execute_bash, read_file, etc.
 ```
 
+## Persistent Storage
+
+The sandbox provides **automatic persistent storage** using Docker volumes, ensuring that Python variables and files survive container crashes, worker restarts, and even Docker daemon restarts.
+
+### How It Works
+
+When you start a container with a workflow_id, the system automatically:
+1. Creates a Docker volume named `workflow-{workflow_id}` (or reuses existing one)
+2. Mounts it at `/persistent-storage/` inside the container
+3. Saves Python state to `/persistent-storage/{workflow_id}/state/globals.pkl`
+4. Restores state automatically when the workflow restarts with the same ID
+
+### Basic Usage
+
+**Persistence is enabled by default:**
+
+```python
+from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import PersistentContainerSandbox
+from temporal.pydanticai.codeact.datamodels.sandbox import StartContainerArgs, ExecutePythonArgs
+
+# Persistence enabled by default
+sandbox = PersistentContainerSandbox()
+
+# Start container with workflow_id
+container_id = await sandbox.start_container(
+    StartContainerArgs(container_name="data-pipeline-123")
+)
+
+# Execute code - variables are saved automatically
+await sandbox.execute_python(ExecutePythonArgs(
+    container_id=container_id,
+    code="results = {'accuracy': 0.95, 'loss': 0.03}"
+))
+
+# If worker crashes here and restarts with same ID...
+
+# State is automatically recovered!
+await sandbox.execute_python(ExecutePythonArgs(
+    container_id=container_id,
+    code="print(results)"  # Still works!
+))
+```
+
+### Configuration Options
+
+**Via Constructor:**
+```python
+# Enable/disable persistence
+sandbox = PersistentContainerSandbox(enable_persistence=True)
+
+# Use NFS for multi-host deployments
+sandbox = PersistentContainerSandbox(
+    volume_driver='nfs',
+    volume_driver_opts={
+        'type': 'nfs',
+        'o': 'addr=nfs-server.company.com,rw',
+        'device': ':/exports/workflows'
+    }
+)
+
+# Disable persistence for ephemeral workflows
+sandbox = PersistentContainerSandbox(enable_persistence=False)
+```
+
+**Via Environment Variables:**
+```bash
+# .env
+ENABLE_PERSISTENCE=true
+VOLUME_DRIVER=local  # or 'nfs'
+NFS_SERVER=nfs-server.company.com
+NFS_PATH=/exports/workflows
+```
+
+### Volume Management
+
+**List all workflow volumes:**
+```python
+volumes = await sandbox.list_workflow_volumes()
+for vol in volumes:
+    print(f"Workflow: {vol['workflow_id']}, Created: {vol['created']}")
+```
+
+**Cleanup completed workflows:**
+```python
+# When workflow completes and you don't need the data anymore
+await sandbox.cleanup_workflow_volume("data-pipeline-123")
+```
+
+**Manual cleanup (via Docker CLI):**
+```bash
+# List workflow volumes
+docker volume ls | grep workflow-
+
+# Inspect specific volume
+docker volume inspect workflow-data-pipeline-123
+
+# Remove specific volume
+docker volume rm workflow-data-pipeline-123
+
+# Remove all workflow volumes (careful!)
+docker volume rm $(docker volume ls -q | grep "^workflow-")
+```
+
+### Storage Paths
+
+**Inside containers:**
+- **State**: `/persistent-storage/{workflow_id}/state/globals.pkl`
+- **Output**: `/persistent-storage/{workflow_id}/output/`
+
+**On host:**
+- **Local**: Docker-managed (`/var/lib/docker/volumes/workflow-{id}`)
+- **NFS**: On NFS server at configured path
+
+### Multi-Host Deployments (NFS)
+
+For production deployments across multiple hosts:
+
+```python
+sandbox = PersistentContainerSandbox(
+    volume_driver='nfs',
+    volume_driver_opts={
+        'type': 'nfs',
+        'o': 'addr=nfs-server.company.com,rw',
+        'device': ':/exports/workflows'
+    }
+)
+# Volumes now accessible from any host in the cluster!
+```
+
+### Best Practices
+
+✅ **Do:**
+- Use meaningful workflow IDs (`data-pipeline-2024-01-15-batch-001`)
+- Clean up completed workflows with `cleanup_workflow_volume()`
+- Monitor volume usage with `list_workflow_volumes()`
+- Use NFS for multi-host production deployments
+
+❌ **Don't:**
+- Reuse workflow IDs (each workflow should have unique ID)
+- Delete volumes manually (use `cleanup_workflow_volume()`)
+- Disable persistence in production unless workflow is truly ephemeral
+
+### Troubleshooting
+
+**State not persisting?**
+```python
+# Check if persistence is enabled
+print(f"Persistence: {sandbox.enable_persistence}")
+```
+
+```bash
+# Check if volume was created
+docker volume ls | grep workflow-{your-workflow-id}
+
+# Check container has volume mounted
+docker inspect {container-id} | grep Mounts -A 10
+```
+
+**Volume already exists?**
+This is normal! The sandbox reuses existing volumes. For a fresh start:
+```python
+await sandbox.cleanup_workflow_volume("your-workflow-id")
+container_id = await sandbox.start_container(...)
+```
+
+### Comparison with Alternatives
+
+| Feature | Docker Volumes | SeaweedFS/Other Distributed FS |
+|---------|---------------|-------------------------------|
+| Setup | ✅ None (built-in) | ❌ Complex (4+ containers) |
+| Complexity | ✅ Simple | ❌ High |
+| Single-host | ✅ Yes | ✅ Yes |
+| Multi-host | ➕ With NFS | ✅ Native |
+| Performance | ✅ Local disk | ⚠️ Network overhead |
+| Maintenance | ✅ Low | ⚠️ High |
+
+**Recommendation:** Start with Docker volumes. Upgrade to NFS if you need multi-host. Only consider distributed file systems like SeaweedFS if you need advanced features.
+
 ## Environment Variables
 
 - `TASK_QUEUE` - Temporal task queue name (default: `sample_queue`)
 - `APP_CONFIG_PATH` - Path to configuration file
 - `APP_PROMPTS_PATH` - Path to agent prompts file
 - `GEMINI_API_KEY` - Google Gemini API key (or in app_conf.yml)
+- `ENABLE_PERSISTENCE` - Enable/disable persistent storage (default: `true`)
+- `VOLUME_DRIVER` - Volume driver for persistence (`local` or `nfs`, default: `local`)
+- `NFS_SERVER` - NFS server address (when using NFS driver)
+- `NFS_PATH` - NFS export path (when using NFS driver)
 
 ## Testing
 
