@@ -135,6 +135,9 @@ secrets.yml
 sandbox_state/
 /tmp/
 
+# Development data
+dev-data/
+
 # Documentation builds
 docs/_build/
 site/

@@ -187,3 +187,155 @@ agent = await SimpleAgent.from_agent_confs(
     )
 )
 ```
+
+## Persistent Storage
+
+The library provides **automatic persistent storage** using Docker volumes. Workflow state survives worker crashes, container restarts, and failures.
+
+### Overview
+
+- **Purpose**: Persist Python variables and files across failures
+- **Technology**: Named Docker volumes (one per workflow_id)
+- **Isolation**: Each workflow gets its own isolated volume
+- **Documentation**: See [README_PERSISTENCE.md](README_PERSISTENCE.md) for comprehensive guide
+
+### How It Works
+
+When you start a container with a `container_name`, a persistent volume is automatically created:
+
+```python
+from temporal.pydanticai.codeact.docker_sandbox import PersistentContainerSandbox
+
+sandbox = PersistentContainerSandbox()  # Persistence enabled by default
+
+container_id = await sandbox.start_container(
+    StartContainerArgs(container_name="data-pipeline-123")
+)
+# Creates volume: workflow-data-pipeline-123
+# Mounts at: /persistent-storage/
+```
+
+### What Gets Persisted
+
+- **Python State**: All variables saved to `/persistent-storage/{workflow_id}/state/globals.pkl`
+- **Output Files**: Files written to `/persistent-storage/{workflow_id}/output/`
+- **Survives**: Container crashes, worker restarts, Docker restarts
+
+### Usage Examples
+
+**Automatic Recovery:**
+```python
+# First run
+await sandbox.execute_python(ExecutePythonArgs(
+    container_id=container_id,
+    code="x = 42; results = train_model()"
+))
+
+# Worker crashes here...
+# Workflow restarts with same container_name...
+
+# State recovered automatically!
+await sandbox.execute_python(ExecutePythonArgs(
+    container_id=container_id,
+    code="print(x, results)"  # Still works!
+))
+```
+
+**Ephemeral Workflows:**
+```python
+# Disable persistence for temporary workflows
+sandbox = PersistentContainerSandbox(enable_persistence=False)
+```
+
+**Cleanup:**
+```python
+# Delete volume when workflow completes
+await sandbox.cleanup_workflow_volume("data-pipeline-123")
+```
+
+**List Volumes:**
+```python
+# See all workflow volumes
+volumes = await sandbox.list_workflow_volumes()
+```
+
+### Multi-Host Support (NFS)
+
+For production deployments across multiple hosts:
+
+```python
+sandbox = PersistentContainerSandbox(
+    volume_driver='nfs',
+    volume_driver_opts={
+        'type': 'nfs',
+        'o': 'addr=nfs-server.company.com,rw',
+        'device': ':/exports/workflows'
+    }
+)
+```
+
+Or via environment:
+```bash
+VOLUME_DRIVER=nfs
+NFS_SERVER=nfs-server.company.com
+NFS_PATH=/exports/workflows
+```
+
+### Configuration
+
+**Environment Variables (.env):**
+```bash
+ENABLE_PERSISTENCE=true  # Enable/disable (default: true)
+VOLUME_DRIVER=local      # local, nfs, azure-file-volume, etc.
+```
+
+**Programmatic:**
+```python
+# With persistence (default)
+sandbox = PersistentContainerSandbox()
+
+# Without persistence
+sandbox = PersistentContainerSandbox(enable_persistence=False)
+
+# With NFS
+sandbox = PersistentContainerSandbox(
+    volume_driver='nfs',
+    volume_driver_opts={...}
+)
+```
+
+### Storage Paths
+
+Inside containers:
+- **State**: `/persistent-storage/{workflow_id}/state/globals.pkl`
+- **Output**: `/persistent-storage/{workflow_id}/output/`
+
+On host:
+- **Local**: Docker-managed (`/var/lib/docker/volumes/workflow-{id}`)
+- **NFS**: On NFS server at configured path
+
+### Best Practices
+
+- ✅ Use unique workflow IDs for each execution
+- ✅ Clean up volumes when workflows complete
+- ✅ Use NFS driver for multi-host deployments
+- ✅ Monitor disk usage with `list_workflow_volumes()`
+- ❌ Don't reuse workflow IDs across different workflows
+- ❌ Don't manually delete volumes (use `cleanup_workflow_volume()`)
+
+### Troubleshooting
+
+**Check if volume exists:**
+```bash
+docker volume ls | grep workflow-
+```
+
+**Inspect volume:**
+```bash
+docker volume inspect workflow-{workflow-id}
+```
+
+**Check mount in container:**
+```bash
+docker exec {container-id} ls -la /persistent-storage/
+```

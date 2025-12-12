@@ -13,6 +13,7 @@ Filtering rules:
 - Only includes picklable objects (verified before saving)
 
 This script is used by the execute_python operation when persist_state=True.
+State is stored in persistent storage (Docker volumes or NFS) for durability across container restarts.
 
 Note:
     The filtering ensures that only user-created data variables persist,
@@ -57,5 +58,21 @@ for k, v in _globals_snapshot.items():
     if _is_picklable(v):
         _state_to_save[k] = v
 
-with open('/tmp/sandbox_state/globals.pkl', 'wb') as f:
+# Determine state directory based on persistent storage availability and workflow_id
+import os
+_workflow_id = os.getenv('WORKFLOW_ID', 'default')
+_persistent_base = f'/persistent-storage/{_workflow_id}/state'
+
+# Check if persistent storage mount is available
+if os.path.exists('/persistent-storage') and os.path.ismount('/persistent-storage'):
+    _state_dir = _persistent_base
+    # Ensure workflow-specific subdirectory exists
+    os.makedirs(_state_dir, exist_ok=True)
+else:
+    # Fall back to local storage
+    _state_dir = '/tmp/sandbox_state'
+
+_state_file = os.path.join(_state_dir, 'globals.pkl')
+
+with open(_state_file, 'wb') as f:
     pickle.dump(_state_to_save, f)

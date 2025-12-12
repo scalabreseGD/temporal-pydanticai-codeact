@@ -97,8 +97,44 @@ class PersistentContainerSandbox:
             image_tag: str = "latest",
             memory_limit: str = "512m",
             cpu_limit: float = 1.0,
-            enable_network: bool = True
+            enable_network: bool = True,
+            enable_persistence: bool = True,
+            volume_driver: str = "local",
+            volume_driver_opts: Optional[Dict[str, str]] = None
     ):
+        """
+        Initialize PersistentContainerSandbox.
+
+        Args:
+            dockerfile_path: Path to custom Dockerfile (optional).
+            image_name: Name of the Docker image.
+            image_tag: Tag for the Docker image.
+            memory_limit: Memory limit for containers (e.g., '512m').
+            cpu_limit: CPU limit for containers (e.g., 1.0 = 1 core).
+            enable_network: Whether containers should have network access.
+            enable_persistence: If True, creates named volumes for workflow state persistence.
+            volume_driver: Docker volume driver (default: 'local', can be 'nfs', 'azure-file-volume', etc.).
+            volume_driver_opts: Driver-specific options for network storage (e.g., NFS config).
+
+        Example:
+            ```python
+            # Local persistence (default)
+            sandbox = PersistentContainerSandbox()
+
+            # No persistence (ephemeral)
+            sandbox = PersistentContainerSandbox(enable_persistence=False)
+
+            # NFS-backed persistence for multi-host
+            sandbox = PersistentContainerSandbox(
+                volume_driver='nfs',
+                volume_driver_opts={
+                    'type': 'nfs',
+                    'o': 'addr=nfs-server.com,rw',
+                    'device': ':/exports/workflows'
+                }
+            )
+            ```
+        """
         self.client = docker.from_env()
 
         # Set sandbox directory - use packaged sandbox module
@@ -115,6 +151,11 @@ class PersistentContainerSandbox:
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
         self.enable_network = enable_network
+
+        # Persistence configuration
+        self.enable_persistence = enable_persistence
+        self.volume_driver = volume_driver
+        self.volume_driver_opts = volume_driver_opts or {}
 
         # Dictionary to store containers: {container_id: container_object}
         # self.containers: Dict[str, Any] = {}
@@ -176,25 +217,82 @@ class PersistentContainerSandbox:
             print(f"Build failed: {e}")
             raise
 
+    def _ensure_volume(self, volume_name: str) -> None:
+        """
+        Ensure a named Docker volume exists, creating it if necessary.
+
+        Args:
+            volume_name: Name of the volume to create.
+        """
+        try:
+            self.client.volumes.get(volume_name)
+            print(f"Volume '{volume_name}' already exists, reusing...")
+        except docker.errors.NotFound:
+            print(f"Creating volume '{volume_name}'...")
+            self.client.volumes.create(
+                name=volume_name,
+                driver=self.volume_driver,
+                driver_opts=self.volume_driver_opts if self.volume_driver_opts else None
+            )
+            print(f"Volume '{volume_name}' created successfully")
+
     async def start_container(
             self,
             input_model: StartContainerArgs
     ) -> str:
-        """Start a new persistent container and install packages"""
+        """
+        Start a new persistent container with optional persistent storage.
+
+        If enable_persistence=True and container_name is provided, creates a named
+        volume specific to this workflow_id that persists across container restarts.
+
+        Args:
+            input_model: Container configuration including packages and optional name.
+
+        Returns:
+            str: Container ID or container name if provided.
+        """
         loop = asyncio.get_event_loop()
+
+        # Prepare environment variables
+        environment = {}
+        # Pass workflow_id if container name is provided
+        if input_model.container_name:
+            environment['WORKFLOW_ID'] = input_model.container_name
 
         # Prepare kwargs for container creation
         container_kwargs = {
             'image': self.full_image_name,
-            'command': "tail -f /dev/null",
+            'command': ["tail", "-f", "/dev/null"],
             'detach': True,
             'mem_limit': self.memory_limit,
             'nano_cpus': int(self.cpu_limit * 1e9),
-            'network_disabled': not self.enable_network,
             'remove': False,
             'stdin_open': True,
-            'tty': True
+            'tty': True,
+            'environment': environment,
+            'network_disabled': not self.enable_network
         }
+
+        # Configure persistent storage if enabled
+        if self.enable_persistence and input_model.container_name:
+            # Create workflow-specific volume name
+            volume_name = f"workflow-{input_model.container_name}"
+
+            # Ensure volume exists
+            await loop.run_in_executor(  # type: ignore[arg-type]
+                self.executor,
+                lambda: self._ensure_volume(volume_name)
+            )
+
+            # Mount volume to /persistent-storage
+            container_kwargs['volumes'] = {
+                volume_name: {
+                    'bind': '/persistent-storage',
+                    'mode': 'rw'
+                }
+            }
+            print(f"Persistent storage enabled: volume '{volume_name}' mounted at /persistent-storage")
 
         # Add name if provided
         if input_model.container_name:
@@ -811,10 +909,83 @@ class PersistentContainerSandbox:
         await loop.run_in_executor(self.executor, _restart)  # type: ignore[arg-type]
         return {"success": True}
 
+    async def cleanup_workflow_volume(self, workflow_id: str) -> Dict[str, Any]:
+        """
+        Remove the persistent volume for a specific workflow.
+
+        Use this to clean up storage after a workflow completes and you no longer
+        need its state. This is permanent - all data will be lost!
+
+        Args:
+            workflow_id: The workflow ID (container_name) whose volume should be deleted.
+
+        Returns:
+            Dict with 'success' status and optional 'message'.
+
+        Example:
+            ```python
+            # After workflow completes
+            await sandbox.cleanup_workflow_volume("data-pipeline-123")
+            # Volume 'workflow-data-pipeline-123' is permanently deleted
+            ```
+        """
+        volume_name = f"workflow-{workflow_id}"
+        loop = asyncio.get_event_loop()
+
+        def _remove_volume():
+            try:
+                volume = self.client.volumes.get(volume_name)
+                volume.remove()
+                return {"success": True, "message": f"Volume '{volume_name}' removed successfully"}
+            except docker.errors.NotFound:
+                return {"success": False, "message": f"Volume '{volume_name}' not found"}
+            except docker.errors.APIError as e:
+                return {"success": False, "message": f"Failed to remove volume '{volume_name}': {str(e)}"}
+
+        return await loop.run_in_executor(self.executor, _remove_volume)  # type: ignore[arg-type]
+
+    async def list_workflow_volumes(self) -> List[Dict[str, Any]]:
+        """
+        List all workflow volumes managed by this sandbox.
+
+        Returns:
+            List of dicts containing volume information (name, driver, mountpoint, etc.).
+
+        Example:
+            ```python
+            volumes = await sandbox.list_workflow_volumes()
+            for vol in volumes:
+                print(f"Workflow: {vol['workflow_id']}, Size: {vol.get('size', 'unknown')}")
+            ```
+        """
+        loop = asyncio.get_event_loop()
+
+        def _list_volumes():
+            # Get all volumes starting with 'workflow-'
+            all_volumes = self.client.volumes.list()
+            workflow_volumes = []
+
+            for volume in all_volumes:
+                if volume.name.startswith('workflow-'):
+                    workflow_id = volume.name.replace('workflow-', '', 1)
+                    workflow_volumes.append({
+                        'workflow_id': workflow_id,
+                        'volume_name': volume.name,
+                        'driver': volume.attrs.get('Driver'),
+                        'mountpoint': volume.attrs.get('Mountpoint'),
+                        'created': volume.attrs.get('CreatedAt'),
+                    })
+
+            return workflow_volumes
+
+        return await loop.run_in_executor(self.executor, _list_volumes)  # type: ignore[arg-type]
+
     async def cleanup_containers(self) -> Dict[str, Any]:
         """
-        Cleanup all resources
-        Stop and remove all managed containers
+        Cleanup all resources.
+
+        Stop and remove all managed containers. Note: This does NOT delete volumes.
+        Use cleanup_workflow_volume() to remove persistent storage.
         """
         all_containers = await self.get_all_containers()
         for container_id in all_containers.keys():
