@@ -164,7 +164,7 @@ class ReadOperationsArgs(SandboxBaseArgs):
         path: File or directory path to read/list.
         kind: Literal discriminator for union type resolution.
     """
-    path: str = Field(description='Path of the file to read. Must start with /output')
+    path: str = Field(description='Path of the file to read. Must start with /output or /persistent-storage/output')
     kind: Literal['read_operations'] = Field(default='read_operations')
 
 
@@ -180,7 +180,7 @@ class WriteFileArgs(SandboxBaseArgs):
         content: String content to write to the file.
         kind: Literal discriminator for union type resolution.
     """
-    path: str = Field(description='Path where the file should be written. Must start with /output')
+    path: str = Field(description='Path where the file should be written. Must start with /output or /persistent-storage/output')
     content: str = Field(description='Content to write to the file.')
     kind: Literal['write_file'] = Field(default='write_file')
 

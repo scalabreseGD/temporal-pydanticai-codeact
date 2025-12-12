@@ -9,8 +9,22 @@ Output:
 """
 
 import pickle
+import os
+
+# Determine state directory based on persistent storage availability and workflow_id
+workflow_id = os.getenv('WORKFLOW_ID', 'default')
+persistent_base = f'/persistent-storage/{workflow_id}/state'
+
+# Check if persistent storage mount is available
+if os.path.exists('/persistent-storage') and os.path.ismount('/persistent-storage'):
+    state_dir = persistent_base
+else:
+    # Fall back to local storage
+    state_dir = '/tmp/sandbox_state'
+
+state_file = os.path.join(state_dir, 'globals.pkl')
 
 state = {}
-with open('/tmp/sandbox_state/globals.pkl', 'wb') as f:
+with open(state_file, 'wb') as f:
     pickle.dump(state, f)
 print("State cleared")

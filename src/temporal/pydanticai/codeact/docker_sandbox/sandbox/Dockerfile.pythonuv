@@ -26,7 +26,10 @@ WORKDIR /app
 # Make /app read-only to prevent writing there
 RUN chmod -R 555 /app
 
-# Create output directory for Python scripts to write files
+# Create mount point for persistent storage (optional, used when volume is mounted)
+RUN mkdir -p /persistent-storage && chmod 777 /persistent-storage
+
+# Create output directory for scripts to write files (for backward compatibility)
 RUN mkdir -p /output && chmod 777 /output
 
 # Copy sandbox Python scripts into the container
@@ -39,4 +42,4 @@ COPY load_state.py /app/sandbox/load_state.py
 COPY save_state.py /app/sandbox/save_state.py
 
 # Default command
-CMD ["bash"]
+CMD ["tail", "-f", "/dev/null"]
