@@ -197,7 +197,7 @@ The library provides **automatic persistent storage** using Docker volumes. Work
 - **Purpose**: Persist Python variables and files across failures
 - **Technology**: Named Docker volumes (one per workflow_id)
 - **Isolation**: Each workflow gets its own isolated volume
-- **Documentation**: See [README_PERSISTENCE.md](README_PERSISTENCE.md) for comprehensive guide
+- **Documentation**: See [Persistent Storage](README.md#persistent-storage) section in README.md for comprehensive guide
 
 ### How It Works
 
