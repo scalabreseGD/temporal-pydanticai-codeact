@@ -1,10 +1,15 @@
 """
-Code execution agent with Docker sandbox integration.
+Code execution agent with Docker sandbox integration and MCP server support.
 
 This module provides the CodeActAgent class, which extends BaseAgent with
 code execution capabilities in isolated Docker containers. It integrates with
 StatelessPersistentSandbox to provide agents with tools for executing Python
 and bash code safely.
+
+The agent supports Model Context Protocol (MCP) servers, enabling seamless
+integration with external tools and services. MCP tools are automatically
+discovered, serialized, and made available to the agent both as callable
+functions and in the instruction prompt.
 """
 import asyncio
 from datetime import timedelta
@@ -38,10 +43,29 @@ class CodeActAgent(BaseAgent):
     The agent supports dynamic instruction rendering via Jinja2 templates,
     allowing instructions to be customized based on runtime dependencies.
 
+    MCP Server Integration:
+        The agent automatically integrates Model Context Protocol (MCP) servers
+        defined in _get_mcp_toolsets(). MCP tools are:
+        1. Serialized and passed to the Docker sandbox for code execution
+        2. Extracted as Python function signatures and included in instructions
+        3. Made available as callable tools within sandbox Python executions
+
+        This enables agents to use external tools (time, fetch, filesystem, etc.)
+        seamlessly in generated code.
+
     Attributes:
         agent_name: Fixed identifier 'codeact_agent' for this agent type.
         deps_type: CodeActAgentDeps - requires container_id and package lists.
         output_type: str - agent returns string output.
+
+    Example:
+        >>> class MyAgent(CodeActAgent):
+        ...     @staticmethod
+        ...     async def _get_mcp_toolsets(**kwargs):
+        ...         return {
+        ...             'time': WrapperToolset(MCPServerStdio("uvx", ["mcp-server-time"]))
+        ...         }
+        >>> # Agent can now use time tools in sandbox code execution
     """
     agent_name = 'codeact_agent'
     deps_type = CodeActAgentDeps
@@ -113,21 +137,29 @@ class CodeActAgent(BaseAgent):
                            output_type: OutputSpec[OutputDataT] = str,
                            **kwargs):
         """
-        Build a code-execution-enabled agent with sandbox tools.
+        Build a code-execution-enabled agent with sandbox tools and MCP integration.
 
-        Creates the base agent via BaseAgent._build_agent, then instruments it
-        with Docker sandbox tools. Container lifecycle operations are blacklisted
-        since container management is handled by the workflow layer.
+        Creates the base agent and instruments it with Docker sandbox tools.
+        Container lifecycle operations are blacklisted since container management
+        is handled by the workflow layer.
+
+        MCP Server Processing:
+            1. Retrieves MCP toolsets from _get_mcp_toolsets()
+            2. Serializes MCP server configurations for container execution
+            3. Extracts tool schemas as Python function signatures
+            4. Passes function signatures to instruction renderer
+            5. Provides serialized servers to sandbox instrumentation
 
         Args:
             agent_builder: Configuration for building the agent (prompts, model, etc.).
             event_stream_handler: Optional handler for streaming agent events.
             deps_type: Type of dependencies (unused, kept for signature compatibility).
             output_type: Type of agent output (unused, kept for signature compatibility).
-            **kwargs: Additional arguments passed to base agent builder.
+            **kwargs: Additional arguments passed to base agent builder and MCP setup.
 
         Returns:
-            Agent: PydanticAI agent instrumented with sandbox execution tools.
+            Agent: PydanticAI agent instrumented with sandbox execution tools
+                and MCP server configurations.
 
         Note:
             Blacklisted tools (container lifecycle operations) are not exposed
@@ -152,7 +184,6 @@ class CodeActAgent(BaseAgent):
         model = await self._get_llm_model(agent_builder.model_configs)
         base_agent = Agent(name=self.agent_name,
                            model=model,
-                           # toolsets=[*toolsets.values()],
                            system_prompt=self.system_prompt,
                            instructions=self.instructions(tools_as_func=tools_as_func),
                            event_stream_handler=event_stream_handler,
