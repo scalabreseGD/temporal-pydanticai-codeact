@@ -29,11 +29,13 @@ import docker
 from docker.errors import ImageNotFound
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.mcp import MCPServerStdio, MCPServerStreamableHTTP, MCPServerSSE
 from temporalio import activity
 from temporalio.common import WorkflowIDConflictPolicy
 from temporalio.exceptions import ApplicationError
 
-from temporal.pydanticai.codeact.datamodels.sandbox import StartContainerArgs, SandboxBaseArgs, ReadVariableInStateArgs, ExecutePythonArgs, \
+from temporal.pydanticai.codeact.datamodels.sandbox import StartContainerArgs, SandboxBaseArgs, ReadVariableInStateArgs, \
+    ExecutePythonArgs, \
     ExecuteBashArgs, WriteFileArgs, SandboxInputTask, SandboxTaskTypes, SandboxTaskArgsAdapter, \
     InstallAdditionalPackagesArgs, ReadOperationsArgs
 from .sandbox import SANDBOX_DIR, DOCKERFILE_PATH
@@ -423,16 +425,65 @@ class PersistentContainerSandbox:
                 "stderr": str(e)
             }
 
-    async def execute_python(
+    def _serialize_mcp_servers(
             self,
-            input_model: ExecutePythonArgs
-    ) -> Dict[str, Any]:
-        """Execute Python code in the specified container with persistent state"""
-        container = self._get_container_by_id(input_model.container_id)
-        if not container:
-            raise ValueError(f"Container {input_model.container_id} not found")
+            mcp_servers: list[MCPServerStdio | MCPServerStreamableHTTP | MCPServerSSE]
+    ) -> str:
+        """
+        Serialize MCP server configurations to JSON for passing to container.
 
-        # Load sandbox script templates from the packaged sandbox directory
+        Args:
+            mcp_servers: List of MCP server configurations
+
+        Returns:
+            JSON string containing MCP server configurations
+        """
+        configs = []
+
+        for server in mcp_servers:
+            if isinstance(server, MCPServerStdio):
+                # Extract command and args from MCPServerStdio
+                command = getattr(server, 'command')
+                args = getattr(server, 'args')
+                env = getattr(server, 'env', {})
+                cwd = getattr(server, 'cwd', None)
+                config = {
+                    'type': 'stdio',
+                    'command': command,
+                    'args': args,
+                    'env': env,
+                    'cwd': cwd,
+                }
+            elif isinstance(server, MCPServerStreamableHTTP):
+                url = getattr(server, 'url')
+                headers = getattr(server, 'headers')
+
+                config = {
+                    'type': 'streamablehttp',
+                    'url': url,
+                    'headers': headers,
+                }
+            elif isinstance(server, MCPServerSSE):
+                url = getattr(server, 'url')
+                headers = getattr(server, 'headers')
+                config = {
+                    'type': 'sse',
+                    'url': url,
+                    'headers': headers,
+                }
+            else:
+                raise RuntimeError(f"Unsupported server type: {type(server)}")
+            timeout = getattr(server, 'timeout')
+            read_timeout = getattr(server, 'read_timeout')
+            config.update({
+                'timeout': timeout,
+                'read_timeout': read_timeout,
+            })
+            configs.append(config)
+        return json.dumps(configs)
+
+    def _build_execution_script(self, input_model: ExecutePythonArgs) -> str:
+        """Build the complete Python script with state management and variable injection."""
         load_state_script = (self.sandbox_dir / "load_state.py").read_text()
         save_state_script = (self.sandbox_dir / "save_state.py").read_text()
 
@@ -451,16 +502,54 @@ class PersistentContainerSandbox:
         if input_model.persist_state:
             script_parts.append(save_state_script)
 
-        full_script = "\n".join(script_parts)
+        return "\n".join(script_parts)
+
+    async def execute_python(
+            self,
+            input_model: ExecutePythonArgs,
+            mcp_servers: Optional[list[MCPServerStdio | MCPServerStreamableHTTP | MCPServerSSE]] = None,
+    ) -> Dict[str, Any]:
+        """Execute Python code in the specified container with persistent state and optional MCP tools"""
+        container = self._get_container_by_id(input_model.container_id)
+        if not container:
+            raise ValueError(f"Container {input_model.container_id} not found")
 
         loop = asyncio.get_event_loop()
 
+        # Build the complete script with state management
+        full_script = self._build_execution_script(input_model)
+
+        # Choose execution strategy based on whether MCP servers are provided
+        if mcp_servers:
+            # File-based execution with MCP tools
+            def _write_code():
+                container.exec_run(
+                    cmd=["sh", "-c", f"cat > /tmp/user_code.py << 'EOFCODE'\n{full_script}\nEOFCODE"],
+                    stdout=True,
+                    stderr=True
+                )
+
+            await loop.run_in_executor(self.executor, _write_code)  # type: ignore[arg-type]
+
+            # Prepare execution command with MCP configuration
+            cmd = ["python", "/app/sandbox/execute_with_mcp.py"]
+            environment = {
+                'USER_CODE_PATH': '/tmp/user_code.py',
+                'MCP_SERVERS_JSON': self._serialize_mcp_servers(mcp_servers)
+            }
+        else:
+            # Inline execution without MCP
+            cmd = ["python", "-c", full_script]
+            environment = None
+
+        # Execute with unified execution logic
         def _exec():
             exit_code, output = container.exec_run(
-                cmd=["python", "-c", full_script],
+                cmd=cmd,
                 stdout=True,
                 stderr=True,
-                demux=True
+                demux=True,
+                environment=environment
             )
 
             stdout, stderr = output

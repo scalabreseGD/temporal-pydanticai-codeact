@@ -21,6 +21,7 @@ A reusable library for building intelligent agents with safe code execution capa
 🎯 **Type-Safe** - Full Pydantic validation for all inputs and outputs
 🛠️ **Flexible Tools** - Agents can execute Python, run bash commands, manage files, and query state
 📦 **Dynamic Packages** - Install Python and system packages on-demand during execution
+🔌 **MCP Integration** - Native support for Model Context Protocol servers as agent tools
 🌐 **Multi-Host Support** - Optional NFS volumes for shared state across multiple workers
 🎨 **Extensible Design** - Easy to create custom agents with specialized capabilities
 
@@ -476,6 +477,164 @@ agent = await sandbox.instrument_agent(
 
 # Agent can now call: execute_python, execute_bash, read_file, etc.
 ```
+
+### MCP Integration
+
+The sandbox provides **native support for Model Context Protocol (MCP)** servers, allowing agents to call MCP tools directly from within sandboxed code execution. This enables powerful combinations like using time APIs, web scrapers, file systems, and other external tools seamlessly in agent-generated code.
+
+#### How It Works
+
+When you execute Python code with MCP servers, the sandbox:
+1. Starts MCP servers inside the container
+2. Extracts tools from each server
+3. Creates synchronous Python function wrappers for async MCP tools
+4. Injects these functions into the execution namespace
+5. Executes your code with all tools available as regular functions
+6. Handles event loop coordination automatically
+
+#### Basic Usage
+
+```python
+from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import PersistentContainerSandbox
+from temporal.pydanticai.codeact.datamodels.sandbox import StartContainerArgs, ExecutePythonArgs
+from pydantic_ai.mcp import MCPServerStdio
+
+sandbox = PersistentContainerSandbox()
+
+# Start container
+container_id = await sandbox.start_container(StartContainerArgs())
+
+# Create MCP server(s)
+time_server = MCPServerStdio("uvx", ["mcp-server-time"])
+
+# Execute code that calls MCP tools as regular functions!
+code = '''
+# MCP tools are available as regular Python functions
+current_time = get_current_time(timezone="America/New_York")
+print(f"New York time: {current_time}")
+'''
+
+result = await sandbox.execute_python(
+    ExecutePythonArgs(container_id=container_id, code=code),
+    mcp_servers=[time_server]
+)
+```
+
+#### Multiple MCP Servers
+
+You can use multiple MCP servers simultaneously:
+
+```python
+from pydantic_ai.mcp import MCPServerStdio
+
+# Create multiple servers
+time_server = MCPServerStdio("uvx", ["mcp-server-time"])
+fetch_server = MCPServerStdio("uvx", ["mcp-server-fetch"])
+
+code = '''
+# Tools from both servers available!
+time = get_current_time(timezone="UTC")
+content = fetch(url="https://example.com")
+
+print(f"Fetched at {time}")
+print(f"Content length: {len(content)}")
+'''
+
+result = await sandbox.execute_python(
+    ExecutePythonArgs(container_id=container_id, code=code),
+    mcp_servers=[time_server, fetch_server]
+)
+```
+
+#### Architecture
+
+The MCP integration uses a file-based execution approach:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     execute_python() Call                      │
+│    (user code + mcp_servers=[...])                             │
+└──────────────────────┬─────────────────────────────────────────┘
+                       │
+                       ▼
+┌────────────────────────────────────────────────────────────────┐
+│  1. Serialize MCP server configs to JSON                       │
+│  2. Write user code to /tmp/user_code.py in container          │
+│  3. Set environment variables:                                 │
+│     - USER_CODE_PATH=/tmp/user_code.py                         │
+│     - MCP_SERVERS_JSON=[...]                                   │
+└──────────────────────┬─────────────────────────────────────────┘
+                       │
+                       ▼
+┌────────────────────────────────────────────────────────────────┐
+│            Execute: /app/sandbox/execute_with_mcp.py           │
+│                                                                 │
+│  1. Read config from environment                               │
+│  2. Start all MCP servers                                      │
+│  3. Create MCPSandboxExecutor with servers                     │
+│  4. Get namespace with tool wrappers                           │
+│  5. Execute user code with tools available                     │
+│  6. Clean up servers                                           │
+└──────────────────────┬─────────────────────────────────────────┘
+                       │
+                       ▼
+┌────────────────────────────────────────────────────────────────┐
+│                MCPSandboxExecutor Class                         │
+│                                                                 │
+│  - Coordinates async MCP tools with sync exec() context        │
+│  - Creates synchronous wrappers using                          │
+│    asyncio.run_coroutine_threadsafe()                          │
+│  - Provides namespace dict with all tools as functions         │
+│  - Handles multiple servers and tool name conflicts            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Available MCP Servers
+
+The sandbox works with any MCP server that supports stdio transport:
+
+- **`mcp-server-time`** - Time and timezone queries
+- **`mcp-server-fetch`** - Web content fetching
+- **`mcp-server-filesystem`** - File operations
+- **`mcp-server-git`** - Git operations
+- **`mcp-server-sqlite`** - SQLite database access
+- **Custom servers** - Any stdio-based MCP server
+
+#### Key Components
+
+**In Container (`/app/sandbox/`):**
+- **`execute_with_mcp.py`** - Entry point script that reads config, starts servers, and executes code
+- **`mcp_executor.py`** - MCPSandboxExecutor class for event loop coordination and tool wrapping
+
+**In Host:**
+- **`container_sandbox.py`** - `_serialize_mcp_servers()` converts MCPServerStdio to JSON
+- **`execute_python()`** - File-based execution when mcp_servers provided
+
+#### Features
+
+✅ **Automatic Tool Discovery** - All tools from all servers become available functions
+✅ **Event Loop Coordination** - Async MCP tools work in sync exec() context
+✅ **Multiple Servers** - Use any number of MCP servers simultaneously
+✅ **Clean Architecture** - File-based approach avoids complex string generation
+✅ **Error Handling** - Proper server lifecycle management with AsyncExitStack
+✅ **Name Conflict Detection** - Prevents tool name collisions across servers
+
+#### Limitations
+
+- ⚠️ Only stdio-based MCP servers supported (no HTTP/SSE yet)
+- ⚠️ Tool functions return strings (MCP response serialized)
+- ⚠️ Tools execute with 30-second timeout
+- ⚠️ Container needs network access for `uvx` to install MCP servers
+
+#### Testing
+
+Run the MCP integration test:
+
+```bash
+pytest tests/test_mcp_integration.py -v
+```
+
+See `tests/test_mcp_integration.py` and `src/example/dupa_test.py` for complete examples.
 
 ## Persistent Storage
 
