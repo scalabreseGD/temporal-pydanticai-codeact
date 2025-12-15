@@ -66,7 +66,7 @@ class BaseAgent:
         """Get the system prompt for the agent."""
         return self._prompts.system_prompt
 
-    def instructions(self) -> Instructions[AgentDepsT]:
+    def instructions(self, **kwargs) -> Instructions[AgentDepsT]:
         """Get the instructions for the agent, defaults to empty string if not set."""
 
         async def instructions_cb():

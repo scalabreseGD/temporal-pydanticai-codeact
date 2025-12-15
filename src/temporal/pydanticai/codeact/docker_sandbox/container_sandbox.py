@@ -29,7 +29,6 @@ import docker
 from docker.errors import ImageNotFound
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.mcp import MCPServerStdio, MCPServerStreamableHTTP, MCPServerSSE
 from temporalio import activity
 from temporalio.common import WorkflowIDConflictPolicy
 from temporalio.exceptions import ApplicationError
@@ -39,6 +38,7 @@ from temporal.pydanticai.codeact.datamodels.sandbox import StartContainerArgs, S
     ExecuteBashArgs, WriteFileArgs, SandboxInputTask, SandboxTaskTypes, SandboxTaskArgsAdapter, \
     InstallAdditionalPackagesArgs, ReadOperationsArgs
 from .sandbox import SANDBOX_DIR, DOCKERFILE_PATH
+from ..datamodels.mcp_tools import ModelSerializedMcp, ModelSerializedMcpAdapter
 
 
 class PersistentContainerSandbox:
@@ -425,63 +425,6 @@ class PersistentContainerSandbox:
                 "stderr": str(e)
             }
 
-    def _serialize_mcp_servers(
-            self,
-            mcp_servers: list[MCPServerStdio | MCPServerStreamableHTTP | MCPServerSSE]
-    ) -> str:
-        """
-        Serialize MCP server configurations to JSON for passing to container.
-
-        Args:
-            mcp_servers: List of MCP server configurations
-
-        Returns:
-            JSON string containing MCP server configurations
-        """
-        configs = []
-
-        for server in mcp_servers:
-            if isinstance(server, MCPServerStdio):
-                # Extract command and args from MCPServerStdio
-                command = getattr(server, 'command')
-                args = getattr(server, 'args')
-                env = getattr(server, 'env', {})
-                cwd = getattr(server, 'cwd', None)
-                config = {
-                    'type': 'stdio',
-                    'command': command,
-                    'args': args,
-                    'env': env,
-                    'cwd': cwd,
-                }
-            elif isinstance(server, MCPServerStreamableHTTP):
-                url = getattr(server, 'url')
-                headers = getattr(server, 'headers')
-
-                config = {
-                    'type': 'streamablehttp',
-                    'url': url,
-                    'headers': headers,
-                }
-            elif isinstance(server, MCPServerSSE):
-                url = getattr(server, 'url')
-                headers = getattr(server, 'headers')
-                config = {
-                    'type': 'sse',
-                    'url': url,
-                    'headers': headers,
-                }
-            else:
-                raise RuntimeError(f"Unsupported server type: {type(server)}")
-            timeout = getattr(server, 'timeout')
-            read_timeout = getattr(server, 'read_timeout')
-            config.update({
-                'timeout': timeout,
-                'read_timeout': read_timeout,
-            })
-            configs.append(config)
-        return json.dumps(configs)
-
     def _build_execution_script(self, input_model: ExecutePythonArgs) -> str:
         """Build the complete Python script with state management and variable injection."""
         load_state_script = (self.sandbox_dir / "load_state.py").read_text()
@@ -506,8 +449,7 @@ class PersistentContainerSandbox:
 
     async def execute_python(
             self,
-            input_model: ExecutePythonArgs,
-            mcp_servers: Optional[list[MCPServerStdio | MCPServerStreamableHTTP | MCPServerSSE]] = None,
+            input_model: ExecutePythonArgs
     ) -> Dict[str, Any]:
         """Execute Python code in the specified container with persistent state and optional MCP tools"""
         container = self._get_container_by_id(input_model.container_id)
@@ -520,7 +462,7 @@ class PersistentContainerSandbox:
         full_script = self._build_execution_script(input_model)
 
         # Choose execution strategy based on whether MCP servers are provided
-        if mcp_servers:
+        if input_model.mcp_servers:
             # File-based execution with MCP tools
             def _write_code():
                 container.exec_run(
@@ -535,7 +477,7 @@ class PersistentContainerSandbox:
             cmd = ["python", "/app/sandbox/execute_with_mcp.py"]
             environment = {
                 'USER_CODE_PATH': '/tmp/user_code.py',
-                'MCP_SERVERS_JSON': self._serialize_mcp_servers(mcp_servers)
+                'MCP_SERVERS_JSON': ModelSerializedMcpAdapter.dump_json(input_model.mcp_servers)
             }
         else:
             # Inline execution without MCP
@@ -1366,21 +1308,18 @@ class DurablePersistentContainerSandbox(PersistentContainerSandbox):
         return await super().get_python_state(input_model)
 
     @activity.defn
-    async def execute_python(self, input_model: ExecutePythonArgs) -> Dict[str, Any]:
+    async def execute_python(self,
+                             input_model: ExecutePythonArgs) -> Dict[str, Any]:
         """
         Execute Python code in the container with persistent state.
 
         Runs Python code with automatic state persistence. Variables created
         or modified in the code are saved and available in subsequent executions.
         Optionally inject variables into the execution environment.
-
-        Args:
-            input_model: Contains container_id, code (Python code string), persist_state (bool), and variables (dict).
-
         Returns:
             Dict[str, Any]: Result with 'success', 'output' (stdout), 'error' (stderr), and 'exit_code'.
         """
-        return await super().execute_python(input_model)
+        return await super().execute_python(input_model=input_model)
 
 
 class StatelessPersistentSandbox:
@@ -1477,7 +1416,9 @@ class StatelessPersistentSandbox:
             activity_name: str,
             return_type: Type[Any],
             input_type: Optional[Type[BaseModel]] = None,
-            description: Optional[str] = None):
+            description: Optional[str] = None,
+            mcp_servers: Optional[list[ModelSerializedMcp]] = None
+    ):
 
         if input_type is None:
             async def tool_func(ctx: RunContext[None]):
@@ -1496,6 +1437,37 @@ class StatelessPersistentSandbox:
             ]
             annotations = {
                 'ctx': RunContext[None],
+                'return': return_type
+            }
+        elif activity_name == 'execute_python':
+            # No type hint here - we set it manually via annotations
+            async def tool_func(ctx: RunContext[None], input_model):
+
+                if isinstance(input_model, dict):
+                    activity_args_input = SandboxTaskArgsAdapter.validate_python(input_model)
+                else:
+                    activity_args_input = input_model
+
+                if isinstance(activity_args_input, ExecutePythonArgs):
+                    activity_args_input.mcp_servers = mcp_servers
+
+                child_workflow_id = f"{activity.info().workflow_id}-{activity_name}-{activity.info().activity_id}"
+                return await activity.client().execute_workflow(
+                    id=child_workflow_id,
+                    workflow='SandboxWorkflow',
+                    task_queue=activity.info().task_queue,
+                    result_type=return_type,
+                    id_conflict_policy=WorkflowIDConflictPolicy.TERMINATE_EXISTING,
+                    args=[SandboxInputTask(task_name=SandboxTaskTypes(activity_name), task_args=activity_args_input)]
+                )
+
+            params = [
+                inspect.Parameter('ctx', inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=RunContext[None]),
+                inspect.Parameter('input_model', inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=input_type)
+            ]
+            annotations = {
+                'ctx': RunContext[None],
+                'input_model': input_type,
                 'return': return_type
             }
         else:
@@ -1541,7 +1513,8 @@ class StatelessPersistentSandbox:
     async def instrument_agent(
             self,
             agent: Agent,
-            blacklist: Sequence[str] = None
+            blacklist: Sequence[str] = None,
+            mcp_servers: Optional[list[ModelSerializedMcp]] = None,
     ):
         """
         Instrument a PydanticAI agent with all sandbox activities as tools.
@@ -1561,7 +1534,8 @@ class StatelessPersistentSandbox:
                 activity_name=activity_name,
                 input_type=metadata['input_type'],
                 return_type=metadata['return_type'],
-                description=metadata.get('description')
+                description=metadata.get('description'),
+                mcp_servers=mcp_servers,
             )
             agent.tool(name=activity_name, strict=True)(tool_func)
 

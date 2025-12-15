@@ -2,154 +2,101 @@
 
 from __future__ import annotations
 
-from typing import Any, Union
+from pathlib import Path
+from typing import Literal, Optional, Annotated
 
+import pydantic
+from pydantic import BaseModel, Field, TypeAdapter
 from pydantic_ai import AbstractToolset
-from pydantic_ai.mcp import MCPServerSSE, MCPServerStdio, MCPServerStreamableHTTP
+from pydantic_ai.mcp import MCPServerStdio, MCPServerStreamableHTTP, MCPServerSSE
 
 
-def __json_schema_type_to_python(
-    schema: dict[str, Any], required: bool = True
-) -> str:
-    """Convert a JSON schema type to Python type annotation string.
+class SerializableMCP(BaseModel):
+    timeout: float
+    read_timeout: float
+
+
+class SerializedMcpStdio(SerializableMCP):
+    kind: Literal['stdio'] = 'stdio'
+    command: str
+    args: list[str]
+    env: Optional[dict[str, str]] = Field(default_factory=dict)
+    cwd: Optional[str | Path | None] = Field(default=None)
+
+
+class SerializedMcpHTTP(SerializableMCP):
+    url: str
+    headers: Optional[dict[str, str]] = Field(default_factory=dict)
+
+
+class SerializedMcpStreamableHTTP(SerializedMcpHTTP):
+    kind: Literal['streamablehttp'] = 'streamablehttp'
+
+
+class SerializedMcpSSE(SerializedMcpHTTP):
+    kind: Literal['sse'] = 'sse'
+
+
+ModelSerializedMcp = Annotated[
+    SerializedMcpStdio | SerializedMcpStreamableHTTP | SerializedMcpSSE, pydantic.Discriminator('kind')]
+
+ModelSerializedMcpAdapter = TypeAdapter(list[ModelSerializedMcp],
+                                        config=pydantic.ConfigDict(defer_build=True, ser_json_bytes='base64',
+                                                                   val_json_bytes='base64'))
+
+
+def serialize_mcp_servers(
+        mcp_servers: list[MCPServerStdio | MCPServerStreamableHTTP | MCPServerSSE | AbstractToolset[None]]
+) -> list[ModelSerializedMcp]:
+    """
+    Serialize MCP server configurations to JSON for passing to container.
 
     Args:
-        schema: JSON schema definition for a parameter
-        required: Whether the parameter is required
+        mcp_servers: List of MCP server configurations
 
     Returns:
-        Python type annotation as a string
+        JSON string containing MCP server configurations
     """
-    # Handle anyOf/oneOf unions first (before checking type field)
-    if "anyOf" in schema or "oneOf" in schema:
-        variants = schema.get("anyOf") or schema.get("oneOf", [])
-        types = [__json_schema_type_to_python(v, required=True) for v in variants]
-        base_type = " | ".join(types)
-        return base_type if required else f"{base_type} | None"
+    configs = []
 
-    # Handle enum types
-    if "enum" in schema:
-        enum_values = schema["enum"]
-        # Create a union of literal types
-        literals = " | ".join([f"'{v}'" if isinstance(v, str) else str(v) for v in enum_values])
-        base_type = f"Literal[{literals}]"
-        return base_type if required else f"{base_type} | None"
+    for server in mcp_servers:
+        if isinstance(server, MCPServerStdio):
+            # Extract command and args from MCPServerStdio
+            command = getattr(server, 'command')
+            args = getattr(server, 'args')
+            env = getattr(server, 'env', {})
+            cwd = getattr(server, 'cwd', None)
+            config = {
+                'kind': 'stdio',
+                'command': command,
+                'args': args,
+                'env': env,
+                'cwd': cwd,
+            }
+        elif isinstance(server, MCPServerStreamableHTTP):
+            url = getattr(server, 'url')
+            headers = getattr(server, 'headers')
 
-    json_type = schema.get("type")
-
-    # Handle None/null type
-    if json_type is None or json_type == "null":
-        return "None"
-
-    # Handle array/list types with $ref
-    if json_type == "array":
-        items = schema.get("items", {})
-        if "$ref" in items:
-            ref_name = items["$ref"].split("/")[-1]
-            base_type = f"list[{ref_name}]"
+            config = {
+                'kind': 'streamablehttp',
+                'url': url,
+                'headers': headers,
+            }
+        elif isinstance(server, MCPServerSSE):
+            url = getattr(server, 'url')
+            headers = getattr(server, 'headers')
+            config = {
+                'kind': 'sse',
+                'url': url,
+                'headers': headers,
+            }
         else:
-            item_type = __json_schema_type_to_python(items, required=True)
-            base_type = f"list[{item_type}]"
-        return base_type if required else f"{base_type} | None"
-
-    # Handle object types
-    if json_type == "object":
-        # For complex objects, use dict as a fallback
-        additional = schema.get("additionalProperties")
-        if additional:
-            value_type = __json_schema_type_to_python(additional, required=True) if isinstance(additional, dict) else "Any"
-            base_type = f"dict[str, {value_type}]"
-        else:
-            base_type = "dict[str, Any]"
-        return base_type if required else f"{base_type} | None"
-
-    # Basic type mapping
-    type_map = {
-        "string": "str",
-        "integer": "int",
-        "number": "float",
-        "boolean": "bool",
-        "null": "None",
-    }
-
-    base_type = type_map.get(json_type, "Any")
-    return base_type if required else f"{base_type} | None"
-
-
-def __format_function_signature(
-    name: str, description: str | None, input_schema: dict[str, Any]
-) -> str:
-    """Convert MCP tool metadata to a Python function signature string.
-
-    Args:
-        name: The name of the tool/function
-        description: Optional description of what the tool does
-        input_schema: JSON schema defining the tool's input parameters
-
-    Returns:
-        A formatted Python function signature as a string
-    """
-    # Extract parameters from the schema
-    properties = input_schema.get("properties", {})
-    required_params = set(input_schema.get("required", []))
-
-    # Build parameter list
-    params = []
-    for param_name, param_schema in properties.items():
-        is_required = param_name in required_params
-        param_type = __json_schema_type_to_python(param_schema, required=is_required)
-
-        # Format parameter with type annotation
-        if is_required:
-            params.append(f"{param_name}: {param_type}")
-        else:
-            params.append(f"{param_name}: {param_type} = None")
-
-    # Join parameters
-    params_str = ", ".join(params)
-
-    # Format the function signature
-    signature = f"def {name}({params_str}) -> Any:"
-
-    # Add docstring if description is provided
-    if description:
-        # Clean up the description - escape quotes and handle multi-line
-        clean_desc = description.replace('"""', r"\"\"\"").strip()
-        signature += f'\n    """{clean_desc}"""'
-
-    return signature
-
-
-async def extract_mcp_tools_as_functions(
-    server: AbstractToolset,
-) -> list[str]:
-    """Extract tools from an MCP server and return them as Python function signatures.
-
-    Args:
-        server: An instance of MCPServerStdio, MCPServerStreamableHTTP, or MCPServerSSE
-
-    Returns:
-        A list of Python function signature strings
-
-    Example:
-        >>> server = MCPServerStdio("uv", ["run", "mcp-server-fetch"])
-        >>> functions = await extract_mcp_tools_as_functions(server)
-        >>> for func in functions:
-        ...     print(func)
-        def fetch(url: str, max_length: int | None = None) -> Any:
-            \"\"\"Fetches a URL from the internet and optionally extracts its contents as markdown.\"\"\"
-    """
-    # List all tools from the server (this automatically enters/exits the server context)
-    tools = await server.list_tools()
-
-    # Convert each tool to a function signature
-    function_signatures = []
-    for tool in tools:
-        signature = __format_function_signature(
-            name=tool.name,
-            description=tool.description,
-            input_schema=tool.inputSchema,
-        )
-        function_signatures.append(signature)
-
-    return function_signatures
+            raise RuntimeError(f"Unsupported server type: {type(server)}")
+        timeout = getattr(server, 'timeout')
+        read_timeout = getattr(server, 'read_timeout')
+        config.update({
+            'timeout': timeout,
+            'read_timeout': read_timeout,
+        })
+        configs.append(config)
+    return ModelSerializedMcpAdapter.validate_python(configs)

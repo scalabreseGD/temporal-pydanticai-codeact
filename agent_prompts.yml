@@ -68,6 +68,18 @@ simple_agent:
       * (Standard packages only)
         {% endif %}
     
+      {% if tools_as_func %}
+      The python environment also contains the following functions already available for you.
+      You can leverage these tools, behaving like regular python functions:
+      ```python
+      {% for tool in tools_as_func %}
+      {{ tool }}
+      {% endfor %}
+      ```
+      {% else %}
+      {% endif %}
+      
+    
     **💻 Bash / System Environment:**
     
       * Standard Utils (ls, grep, tar, etc.)

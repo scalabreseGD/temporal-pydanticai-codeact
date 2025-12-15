@@ -12,6 +12,8 @@ from typing import Optional, List, Dict, Any, Annotated, Literal
 import pydantic
 from pydantic import BaseModel, Field, TypeAdapter
 
+from temporal.pydanticai.codeact.datamodels.mcp_tools import ModelSerializedMcp
+
 
 class SandboxTaskTypes(StrEnum):
     """
@@ -135,7 +137,9 @@ class ExecutePythonArgs(SandboxBaseArgs):
                                                 description="Dictionary of Python variables to be injected in the script")
     persist_state: Optional[bool] = Field(default=True,
                                           description="If true, persist state in the container. Defaults to True")
+    mcp_servers: Optional[list[ModelSerializedMcp]] = Field(default=None, description="List of MCP servers. Don't populate it during tool call. Defaults to None")
     kind: Literal['execute_python'] = Field(default='execute_python')
+
 
 
 class ExecuteBashArgs(SandboxBaseArgs):
@@ -180,7 +184,8 @@ class WriteFileArgs(SandboxBaseArgs):
         content: String content to write to the file.
         kind: Literal discriminator for union type resolution.
     """
-    path: str = Field(description='Path where the file should be written. Must start with /output or /persistent-storage/output')
+    path: str = Field(
+        description='Path where the file should be written. Must start with /output or /persistent-storage/output')
     content: str = Field(description='Content to write to the file.')
     kind: Literal['write_file'] = Field(default='write_file')
 
@@ -226,3 +231,4 @@ class SandboxInputTask(BaseModel):
     """
     task_name: SandboxTaskTypes
     task_args: Optional[SandboxTaskArgs] = Field(default=None, description="Task arguments to pass to the task")
+    extra_args: Optional[Any] = Field(default=None, description="Extra arguments to pass to the task")
