@@ -28,7 +28,8 @@ from typing import Dict, Any, List, Type, get_type_hints, Optional, Sequence
 import docker
 from docker.errors import ImageNotFound
 from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, Tool
+from pydantic_ai._run_context import AgentDepsT
 from temporalio import activity
 from temporalio.common import WorkflowIDConflictPolicy
 from temporalio.exceptions import ApplicationError
@@ -1508,25 +1509,26 @@ class StatelessPersistentSandbox:
 
         return tool_func
 
-    async def instrument_agent(
+    async def code_sandbox_tools(
             self,
-            agent: Agent,
             blacklist: Sequence[str] = None,
             mcp_servers: Optional[list[ModelSerializedMcp]] = None,
-    ):
+    ) -> list[Tool[AgentDepsT]]:
         """
-        Instrument a PydanticAI agent with all sandbox activities as tools.
+        Provide all sandbox activities as tools.
+        Accepts also the mcp servers that will be used during the code execution.
 
         Args:
-            agent: PydanticAI Agent to instrument
             blacklist: List of activity names to exclude
+            mcp_servers: List of ModelSerializedMcp instances to use
 
         Example:
             agent = Agent('openai:gpt-4')
-            instrument_agent(agent, blacklist=['cleanup_containers'])
+            code_sandbox_tools(blacklist=['cleanup_containers'],m)
         """
         activities = self.__extract_activities(blacklist=blacklist)
 
+        tools = []
         for activity_name, metadata in activities.items():
             tool_func = self.__create_tool(
                 activity_name=activity_name,
@@ -1535,6 +1537,7 @@ class StatelessPersistentSandbox:
                 description=metadata.get('description'),
                 mcp_servers=mcp_servers,
             )
-            agent.tool(name=activity_name, strict=True)(tool_func)
+            tools.append(Tool(function=tool_func, name=activity_name, strict=True))
+            # agent.tool(name=activity_name, strict=True)(tool_func)
 
-        return agent
+        return tools

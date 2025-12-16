@@ -470,11 +470,9 @@ from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import Statele
 
 # StatelessPersistentSandbox converts activities to agent tools
 sandbox = StatelessPersistentSandbox()
-agent = await sandbox.instrument_agent(
-    agent,
+tools = await sandbox.code_sandbox_tools(
     blacklist=['start_container', 'stop_container']  # Exclude lifecycle ops
 )
-
 # Agent can now call: execute_python, execute_bash, read_file, etc.
 ```
 

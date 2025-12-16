@@ -405,11 +405,12 @@ class BaseAgent:
         )
         return agent
 
+
 class CodeActAgent(BaseAgent):
     async def _build_agent(self, ...):
         base_agent = await super()._build_agent(...)
         # Customize: add sandbox tools
-        return await sandbox.instrument_agent(base_agent)
+        return await sandbox.code_sandbox_tools(base_agent)
 ```
 
 ## Scalability Considerations

@@ -26,7 +26,7 @@ from temporal.pydanticai.codeact.datamodels.agent_builder import TemporalWrapper
 with workflow.unsafe.imports_passed_through():
     from temporal.pydanticai.codeact.datamodels.prompts import AgentPrompts
 
-    from pydantic_ai import Agent, WrapperToolset
+    from pydantic_ai import Agent, WrapperToolset, Tool
     from pydantic_ai.durable_exec.temporal import TemporalAgent
 
 
@@ -84,6 +84,7 @@ class BaseAgent:
     async def _build_agent(self,
                            agent_builder: AgentBuilder,
                            event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
+                           tools: Tool[AgentDepsT] | None = None,
                            **kwargs):
         toolsets = await self._get_mcp_toolsets(**kwargs)
 
@@ -91,6 +92,7 @@ class BaseAgent:
         agent = Agent(name=self.agent_name,
                       model=model,
                       toolsets=[*toolsets.values()],
+                      tools=tools or [],
                       system_prompt=self.system_prompt,
                       instructions=self.instructions(),
                       event_stream_handler=event_stream_handler,
