@@ -5,6 +5,8 @@ This module provides SimpleAgent, a minimal concrete implementation of
 CodeActAgent with all default settings. Use this for basic code execution
 tasks that don't require custom configuration.
 """
+from pydantic_ai import WrapperToolset
+from pydantic_ai.mcp import MCPServerStdio
 from temporalio import workflow
 
 from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentOutput
@@ -40,6 +42,12 @@ class SimpleAgent(CodeActAgent):
     """
     agent_name = 'simple_agent'
     output_type = CodeActAgentOutput
+
+    @staticmethod
+    async def _get_mcp_toolsets(**env_vars) -> dict[str, WrapperToolset]:
+        fetch_mcp = MCPServerStdio("uvx", ["mcp-server-fetch", "--ignore-robots-txt"]).filtered(
+            lambda ctx, tool_def: True)
+        return {'fetch': fetch_mcp}
 
     async def _get_llm_model(self, model_configs):
         """

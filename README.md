@@ -21,6 +21,7 @@ A reusable library for building intelligent agents with safe code execution capa
 🎯 **Type-Safe** - Full Pydantic validation for all inputs and outputs
 🛠️ **Flexible Tools** - Agents can execute Python, run bash commands, manage files, and query state
 📦 **Dynamic Packages** - Install Python and system packages on-demand during execution
+🔌 **MCP Integration** - Native support for Model Context Protocol servers as agent tools
 🌐 **Multi-Host Support** - Optional NFS volumes for shared state across multiple workers
 🎨 **Extensible Design** - Easy to create custom agents with specialized capabilities
 
@@ -475,6 +476,347 @@ agent = await sandbox.instrument_agent(
 )
 
 # Agent can now call: execute_python, execute_bash, read_file, etc.
+```
+
+### MCP Integration
+
+The library provides **native support for Model Context Protocol (MCP)** servers at two levels:
+
+1. **Agent-Level Integration** - MCP servers as tools available to CodeActAgent subclasses
+2. **Sandbox-Level Integration** - MCP tools callable from within sandboxed Python code execution
+
+This enables powerful combinations like using time APIs, web scrapers, file systems, and other external tools seamlessly in agent workflows.
+
+#### How It Works
+
+When you execute Python code with MCP servers, the sandbox:
+1. Starts MCP servers inside the container
+2. Extracts tools from each server
+3. Creates synchronous Python function wrappers for async MCP tools
+4. Injects these functions into the execution namespace
+5. Executes your code with all tools available as regular functions
+6. Handles event loop coordination automatically
+
+#### Basic Usage
+
+```python
+from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import PersistentContainerSandbox
+from temporal.pydanticai.codeact.datamodels.sandbox import StartContainerArgs, ExecutePythonArgs
+from pydantic_ai.mcp import MCPServerStdio
+
+sandbox = PersistentContainerSandbox()
+
+# Start container
+container_id = await sandbox.start_container(StartContainerArgs())
+
+# Create MCP server(s)
+time_server = MCPServerStdio("uvx", ["mcp-server-time"])
+
+# Execute code that calls MCP tools as regular functions!
+code = '''
+# MCP tools are available as regular Python functions
+current_time = get_current_time(timezone="America/New_York")
+print(f"New York time: {current_time}")
+'''
+
+result = await sandbox.execute_python(
+    ExecutePythonArgs(container_id=container_id, code=code),
+    mcp_servers=[time_server]
+)
+```
+
+#### Multiple MCP Servers
+
+You can use multiple MCP servers simultaneously:
+
+```python
+from pydantic_ai.mcp import MCPServerStdio
+
+# Create multiple servers
+time_server = MCPServerStdio("uvx", ["mcp-server-time"])
+fetch_server = MCPServerStdio("uvx", ["mcp-server-fetch"])
+
+code = '''
+# Tools from both servers available!
+time = get_current_time(timezone="UTC")
+content = fetch(url="https://example.com")
+
+print(f"Fetched at {time}")
+print(f"Content length: {len(content)}")
+'''
+
+result = await sandbox.execute_python(
+    ExecutePythonArgs(container_id=container_id, code=code),
+    mcp_servers=[time_server, fetch_server]
+)
+```
+
+#### Architecture
+
+The MCP integration uses a file-based execution approach:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     execute_python() Call                      │
+│    (user code + mcp_servers=[...])                             │
+└──────────────────────┬─────────────────────────────────────────┘
+                       │
+                       ▼
+┌────────────────────────────────────────────────────────────────┐
+│  1. Serialize MCP server configs to JSON                       │
+│  2. Write user code to /tmp/user_code.py in container          │
+│  3. Set environment variables:                                 │
+│     - USER_CODE_PATH=/tmp/user_code.py                         │
+│     - MCP_SERVERS_JSON=[...]                                   │
+└──────────────────────┬─────────────────────────────────────────┘
+                       │
+                       ▼
+┌────────────────────────────────────────────────────────────────┐
+│            Execute: /app/sandbox/execute_with_mcp.py           │
+│                                                                 │
+│  1. Read config from environment                               │
+│  2. Start all MCP servers                                      │
+│  3. Create MCPSandboxExecutor with servers                     │
+│  4. Get namespace with tool wrappers                           │
+│  5. Execute user code with tools available                     │
+│  6. Clean up servers                                           │
+└──────────────────────┬─────────────────────────────────────────┘
+                       │
+                       ▼
+┌────────────────────────────────────────────────────────────────┐
+│                MCPSandboxExecutor Class                         │
+│                                                                 │
+│  - Coordinates async MCP tools with sync exec() context        │
+│  - Creates synchronous wrappers using                          │
+│    asyncio.run_coroutine_threadsafe()                          │
+│  - Provides namespace dict with all tools as functions         │
+│  - Handles multiple servers and tool name conflicts            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Available MCP Servers
+
+The sandbox works with any MCP server that supports stdio transport:
+
+- **`mcp-server-time`** - Time and timezone queries
+- **`mcp-server-fetch`** - Web content fetching
+- **`mcp-server-filesystem`** - File operations
+- **`mcp-server-git`** - Git operations
+- **`mcp-server-sqlite`** - SQLite database access
+- **Custom servers** - Any stdio-based MCP server
+
+#### Key Components
+
+**In Container (`/app/sandbox/`):**
+- **`execute_with_mcp.py`** - Entry point script that reads config, starts servers, and executes code
+- **`mcp_executor.py`** - MCPSandboxExecutor class for event loop coordination and tool wrapping
+
+**In Host:**
+- **`container_sandbox.py`** - `_serialize_mcp_servers()` converts MCPServerStdio to JSON
+- **`execute_python()`** - File-based execution when mcp_servers provided
+
+#### Features
+
+✅ **Automatic Tool Discovery** - All tools from all servers become available functions
+✅ **Event Loop Coordination** - Async MCP tools work in sync exec() context
+✅ **Multiple Servers** - Use any number of MCP servers simultaneously
+✅ **Clean Architecture** - File-based approach avoids complex string generation
+✅ **Error Handling** - Proper server lifecycle management with AsyncExitStack
+✅ **Name Conflict Detection** - Prevents tool name collisions across servers
+
+#### Limitations
+
+- ⚠️ Only stdio-based MCP servers supported (no HTTP/SSE yet)
+- ⚠️ Tool functions return strings (MCP response serialized)
+- ⚠️ Tools execute with 30-second timeout
+- ⚠️ Container needs network access for `uvx` to install MCP servers
+
+#### Testing
+
+Run the MCP integration test:
+
+```bash
+pytest tests/test_mcp_integration.py -v
+```
+
+See `tests/test_mcp_integration.py` and `src/example/dupa_test.py` for complete examples.
+
+#### Agent-Level MCP Integration
+
+**CodeActAgent** subclasses can integrate MCP servers directly, making tools available both as:
+1. Function signatures included in agent instructions (for awareness)
+2. Callable tools within sandbox Python executions (for actual usage)
+
+This enables agents to understand what external tools are available and use them seamlessly in generated code.
+
+**How It Works:**
+
+When building a CodeActAgent, the system automatically:
+1. Calls `_get_mcp_toolsets()` to retrieve MCP server configurations
+2. Serializes server configs for container execution
+3. Extracts tool schemas as Python function signatures via `extract_mcp_tools_as_functions`
+4. Injects function signatures into agent instructions template (via `{{ tools_as_func }}` variable)
+5. Passes serialized servers to sandbox instrumentation for runtime execution
+
+**Creating an Agent with MCP Tools:**
+
+```python
+from temporal.pydanticai.codeact.agents.base.code_act_agent import CodeActAgent
+from pydantic_ai import WrapperToolset
+from pydantic_ai.mcp import MCPServerStdio
+
+class DataAnalysisAgent(CodeActAgent):
+    """Agent with access to time and fetch tools."""
+
+    @staticmethod
+    async def _get_mcp_toolsets(**kwargs):
+        """Define MCP servers available to this agent."""
+        return {
+            'time': WrapperToolset(MCPServerStdio("uvx", ["mcp-server-time"])),
+            'fetch': WrapperToolset(MCPServerStdio("uvx", ["mcp-server-fetch"]))
+        }
+```
+
+**Agent Prompt Template:**
+
+```yaml
+# agent_prompts.yml
+data_analysis_agent:
+  system_prompt: "You are a data analysis assistant with code execution capabilities."
+  instructions: |
+    You have access to a Docker sandbox (container: {{ container_id }}).
+
+    Installed packages: {{ python_packages }}
+    Current variables: {{ sandbox_variable_names }}
+    Files available: {{ sandbox_files }}
+
+    {% if tools_as_func %}
+    ## External Tools Available
+
+    The following external tools are available as Python functions in your sandbox:
+
+    {% for func in tools_as_func %}
+    ```python
+    {{ func }}
+    ```
+    {% endfor %}
+
+    Use these tools by calling them as regular Python functions in your execute_python code.
+    {% endif %}
+
+    Solve the user's task using the available tools and packages.
+```
+
+**Usage Example:**
+
+```python
+from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
+from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentDeps
+
+# Build agent with MCP integration
+agent = await DataAnalysisAgent.from_agent_confs(
+    agent_builder=AgentBuilder(
+        prompts=prompts,
+        model_configs=model_configs
+    )
+)
+
+# Run agent - it can now use time and fetch tools in its code!
+result = await agent.run(
+    user_prompt="Fetch the homepage of example.com and report the current time",
+    deps=CodeActAgentDeps(container_id=container_id)
+)
+```
+
+**What the Agent Sees:**
+
+The agent's instructions will include the MCP tool signatures:
+
+```python
+def get_current_time(timezone: str | None = None) -> Any:
+    """Get the current time in a specific timezone."""
+
+def fetch(url: str, max_length: int | None = None) -> Any:
+    """Fetches a URL from the internet and extracts its contents as markdown."""
+```
+
+The agent can then generate code like:
+
+```python
+# Agent-generated code
+time = get_current_time(timezone="UTC")
+content = fetch(url="https://example.com", max_length=5000)
+print(f"Fetched at {time}")
+print(f"Content preview: {content[:200]}")
+```
+
+**Key Benefits:**
+
+✅ **Tool Awareness** - Agent knows what external tools are available and their signatures
+✅ **Seamless Integration** - Tools work like regular Python functions in sandbox code
+✅ **Type Safety** - Function signatures extracted from MCP JSON schemas
+✅ **Automatic Management** - No manual tool registration or wrapper code needed
+✅ **Multiple Servers** - Support for any number of MCP servers per agent
+
+**Architecture Flow:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  CodeActAgent Subclass                                  │
+│  └─ _get_mcp_toolsets() → {name: MCPServerStdio}       │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────────────┐
+│  _build_agent()                                         │
+│  1. Serialize MCP servers                               │
+│  2. Extract tool signatures (Temporal activity)         │
+│  3. Pass signatures to instruction renderer             │
+│  4. Pass serialized servers to sandbox instrumentation  │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+                   ├──────────────────┬──────────────────┐
+                   ▼                  ▼                  ▼
+      ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐
+      │  Instructions   │  │  Sandbox Tools  │  │  MCP Servers │
+      │  (with tool     │  │  (execute_*,    │  │  (serialized │
+      │   signatures)   │  │   read_file,    │  │   for        │
+      │                 │  │   etc.)         │  │   container) │
+      └─────────────────┘  └─────────────────┘  └──────────────┘
+                                                        │
+                                                        ▼
+                                            ┌───────────────────┐
+                                            │  execute_python   │
+                                            │  + mcp_servers    │
+                                            │  → Tools callable │
+                                            └───────────────────┘
+```
+
+**Supported MCP Server Types:**
+
+- **MCPServerStdio** - Standard input/output transport (most common)
+- **MCPServerSSE** - Server-Sent Events transport
+- **MCPServerStreamableHTTP** - HTTP streaming transport
+
+**Example with Multiple Agents:**
+
+```python
+class TimeAwareAgent(CodeActAgent):
+    @staticmethod
+    async def _get_mcp_toolsets(**kwargs):
+        return {
+            'time': WrapperToolset(MCPServerStdio("uvx", ["mcp-server-time"]))
+        }
+
+class WebScrapingAgent(CodeActAgent):
+    @staticmethod
+    async def _get_mcp_toolsets(**kwargs):
+        return {
+            'fetch': WrapperToolset(MCPServerStdio("uvx", ["mcp-server-fetch"])),
+            'filesystem': WrapperToolset(MCPServerStdio("uvx", ["mcp-server-filesystem"]))
+        }
+
+# Each agent has access to only its defined toolsets
 ```
 
 ## Persistent Storage

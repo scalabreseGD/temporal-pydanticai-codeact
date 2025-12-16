@@ -23,6 +23,9 @@ ENV UV_LINK_MODE=copy \
 # Set working directory
 WORKDIR /app
 
+# Install pydantic-ai-slim with MCP support and jsonref for MCP tool schema parsing
+RUN uv pip install --system "pydantic-ai-slim[mcp]" jsonref
+
 # Make /app read-only to prevent writing there
 RUN chmod -R 555 /app
 
@@ -40,6 +43,11 @@ COPY read_variable.py /app/sandbox/read_variable.py
 COPY clear_state.py /app/sandbox/clear_state.py
 COPY load_state.py /app/sandbox/load_state.py
 COPY save_state.py /app/sandbox/save_state.py
+COPY mcp_executor.py /app/sandbox/mcp_executor.py
+COPY execute_with_mcp.py /app/sandbox/execute_with_mcp.py
+
+# Make execute_with_mcp.py executable
+RUN chmod +x /app/sandbox/execute_with_mcp.py
 
 # Default command
 CMD ["tail", "-f", "/dev/null"]

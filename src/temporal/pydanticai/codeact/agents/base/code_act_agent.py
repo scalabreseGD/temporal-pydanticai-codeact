@@ -1,24 +1,30 @@
 """
-Code execution agent with Docker sandbox integration.
+Code execution agent with Docker sandbox integration and MCP server support.
 
 This module provides the CodeActAgent class, which extends BaseAgent with
 code execution capabilities in isolated Docker containers. It integrates with
 StatelessPersistentSandbox to provide agents with tools for executing Python
 and bash code safely.
+
+The agent supports Model Context Protocol (MCP) servers, enabling seamless
+integration with external tools and services. MCP tools are automatically
+discovered, serialized, and made available to the agent both as callable
+functions and in the instruction prompt.
 """
 import asyncio
 from datetime import timedelta
+from typing import List, Optional
 
 from pydantic_ai import RunContext
 from pydantic_ai._run_context import AgentDepsT
-from pydantic_ai.agent import EventStreamHandler, NoneType, Instructions
+from pydantic_ai.agent import EventStreamHandler, NoneType, Instructions, Agent
 from pydantic_ai.durable_exec.temporal import TemporalAgent
 from pydantic_ai.output import OutputSpec, OutputDataT
 from temporalio import workflow
 
-from temporal.pydanticai.codeact.datamodels.sandbox import SandboxBaseArgs
-
 with workflow.unsafe.imports_passed_through():
+    from temporal.pydanticai.codeact.datamodels.mcp_tools import serialize_mcp_servers
+    from temporal.pydanticai.codeact.datamodels.sandbox import SandboxBaseArgs
     from temporal.pydanticai.codeact.agents.base.base_agent import BaseAgent
     from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
     from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentDeps
@@ -37,16 +43,35 @@ class CodeActAgent(BaseAgent):
     The agent supports dynamic instruction rendering via Jinja2 templates,
     allowing instructions to be customized based on runtime dependencies.
 
+    MCP Server Integration:
+        The agent automatically integrates Model Context Protocol (MCP) servers
+        defined in _get_mcp_toolsets(). MCP tools are:
+        1. Serialized and passed to the Docker sandbox for code execution
+        2. Extracted as Python function signatures and included in instructions
+        3. Made available as callable tools within sandbox Python executions
+
+        This enables agents to use external tools (time, fetch, filesystem, etc.)
+        seamlessly in generated code.
+
     Attributes:
         agent_name: Fixed identifier 'codeact_agent' for this agent type.
         deps_type: CodeActAgentDeps - requires container_id and package lists.
         output_type: str - agent returns string output.
+
+    Example:
+        >>> class MyAgent(CodeActAgent):
+        ...     @staticmethod
+        ...     async def _get_mcp_toolsets(**kwargs):
+        ...         return {
+        ...             'time': WrapperToolset(MCPServerStdio("uvx", ["mcp-server-time"]))
+        ...         }
+        >>> # Agent can now use time tools in sandbox code execution
     """
     agent_name = 'codeact_agent'
     deps_type = CodeActAgentDeps
     output_type = str
 
-    def instructions(self) -> Instructions[AgentDepsT]:
+    def instructions(self, **kwargs) -> Instructions[AgentDepsT]:
         """
         Generate dynamic instructions using Jinja2 template rendering.
 
@@ -64,12 +89,14 @@ class CodeActAgent(BaseAgent):
         """
 
         async def _instructions_cb(context: RunContext[AgentDepsT]):
-            return await CodeActAgent._render_instructions(self._prompts.instructions or '', context.deps)
+            return await CodeActAgent._render_instructions(self._prompts.instructions or '', context.deps,
+                                                           kwargs.get('tools_as_func', None))
 
         return _instructions_cb
 
     @staticmethod
-    async def _render_instructions(base_instruction: str, deps: CodeActAgentDeps):
+    async def _render_instructions(base_instruction: str, deps: CodeActAgentDeps,
+                                   tools_as_func: Optional[List[str]] = None):
         model_input = SandboxBaseArgs(container_id=deps.container_id)
         # we always fetch the latest variable lists from the code sandbox
         if workflow.in_workflow():
@@ -91,6 +118,7 @@ class CodeActAgent(BaseAgent):
         deps_args = deps.model_dump()
         deps_args['sandbox_variable_names'] = variables
         deps_args['sandbox_files'] = files["files"]
+        deps_args['tools_as_func'] = tools_as_func
 
         if workflow.in_workflow():
             rendered_prompt = await workflow.execute_activity(
@@ -109,27 +137,60 @@ class CodeActAgent(BaseAgent):
                            output_type: OutputSpec[OutputDataT] = str,
                            **kwargs):
         """
-        Build a code-execution-enabled agent with sandbox tools.
+        Build a code-execution-enabled agent with sandbox tools and MCP integration.
 
-        Creates the base agent via BaseAgent._build_agent, then instruments it
-        with Docker sandbox tools. Container lifecycle operations are blacklisted
-        since container management is handled by the workflow layer.
+        Creates the base agent and instruments it with Docker sandbox tools.
+        Container lifecycle operations are blacklisted since container management
+        is handled by the workflow layer.
+
+        MCP Server Processing:
+            1. Retrieves MCP toolsets from _get_mcp_toolsets()
+            2. Serializes MCP server configurations for container execution
+            3. Extracts tool schemas as Python function signatures
+            4. Passes function signatures to instruction renderer
+            5. Provides serialized servers to sandbox instrumentation
 
         Args:
             agent_builder: Configuration for building the agent (prompts, model, etc.).
             event_stream_handler: Optional handler for streaming agent events.
             deps_type: Type of dependencies (unused, kept for signature compatibility).
             output_type: Type of agent output (unused, kept for signature compatibility).
-            **kwargs: Additional arguments passed to base agent builder.
+            **kwargs: Additional arguments passed to base agent builder and MCP setup.
 
         Returns:
-            Agent: PydanticAI agent instrumented with sandbox execution tools.
+            Agent: PydanticAI agent instrumented with sandbox execution tools
+                and MCP server configurations.
 
         Note:
             Blacklisted tools (container lifecycle operations) are not exposed
             to the agent as these are managed by CodeActAgentWorkflow.
         """
-        base_agent = await super()._build_agent(agent_builder, event_stream_handler, **kwargs)
+
+        toolsets = await self._get_mcp_toolsets(**kwargs)
+        wrapped_toolsets = [w.wrapped for w in toolsets.values()]
+        serialized_servers = serialize_mcp_servers(wrapped_toolsets)
+        if toolsets:
+            if workflow.in_workflow():
+                tools_as_func = await workflow.execute_activity(activity='extract_mcp_tools_as_functions',
+                                                                arg=serialized_servers,
+                                                                start_to_close_timeout=timedelta(minutes=10),
+                                                                )
+            else:
+                from temporal.pydanticai.codeact.activities.mcp_functions import extract_mcp_tools_as_functions
+                tools_as_func = await extract_mcp_tools_as_functions(serialized_servers)
+        else:
+            tools_as_func = None
+
+        model = await self._get_llm_model(agent_builder.model_configs)
+        base_agent = Agent(name=self.agent_name,
+                           model=model,
+                           system_prompt=self.system_prompt,
+                           instructions=self.instructions(tools_as_func=tools_as_func),
+                           event_stream_handler=event_stream_handler,
+                           deps_type=self.deps_type,
+                           output_type=self.output_type
+                           )
+
         serverless_sandbox = StatelessPersistentSandbox()
         instrumented_agent = await serverless_sandbox.instrument_agent(agent=base_agent,
                                                                        blacklist=[
@@ -139,7 +200,8 @@ class CodeActAgent(BaseAgent):
                                                                            'get_container_info',
                                                                            'get_all_containers',
                                                                            'cleanup_containers'
-                                                                       ]
+                                                                       ],
+                                                                       mcp_servers=serialized_servers
                                                                        )
         return instrumented_agent
 

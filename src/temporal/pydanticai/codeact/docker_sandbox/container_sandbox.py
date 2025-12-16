@@ -33,10 +33,12 @@ from temporalio import activity
 from temporalio.common import WorkflowIDConflictPolicy
 from temporalio.exceptions import ApplicationError
 
-from temporal.pydanticai.codeact.datamodels.sandbox import StartContainerArgs, SandboxBaseArgs, ReadVariableInStateArgs, ExecutePythonArgs, \
+from temporal.pydanticai.codeact.datamodels.sandbox import StartContainerArgs, SandboxBaseArgs, ReadVariableInStateArgs, \
+    ExecutePythonArgs, \
     ExecuteBashArgs, WriteFileArgs, SandboxInputTask, SandboxTaskTypes, SandboxTaskArgsAdapter, \
     InstallAdditionalPackagesArgs, ReadOperationsArgs
 from .sandbox import SANDBOX_DIR, DOCKERFILE_PATH
+from ..datamodels.mcp_tools import ModelSerializedMcp, ModelSerializedMcpAdapter
 
 
 class PersistentContainerSandbox:
@@ -423,16 +425,8 @@ class PersistentContainerSandbox:
                 "stderr": str(e)
             }
 
-    async def execute_python(
-            self,
-            input_model: ExecutePythonArgs
-    ) -> Dict[str, Any]:
-        """Execute Python code in the specified container with persistent state"""
-        container = self._get_container_by_id(input_model.container_id)
-        if not container:
-            raise ValueError(f"Container {input_model.container_id} not found")
-
-        # Load sandbox script templates from the packaged sandbox directory
+    def _build_execution_script(self, input_model: ExecutePythonArgs) -> str:
+        """Build the complete Python script with state management and variable injection."""
         load_state_script = (self.sandbox_dir / "load_state.py").read_text()
         save_state_script = (self.sandbox_dir / "save_state.py").read_text()
 
@@ -451,16 +445,53 @@ class PersistentContainerSandbox:
         if input_model.persist_state:
             script_parts.append(save_state_script)
 
-        full_script = "\n".join(script_parts)
+        return "\n".join(script_parts)
+
+    async def execute_python(
+            self,
+            input_model: ExecutePythonArgs
+    ) -> Dict[str, Any]:
+        """Execute Python code in the specified container with persistent state and optional MCP tools"""
+        container = self._get_container_by_id(input_model.container_id)
+        if not container:
+            raise ValueError(f"Container {input_model.container_id} not found")
 
         loop = asyncio.get_event_loop()
 
+        # Build the complete script with state management
+        full_script = self._build_execution_script(input_model)
+
+        # Choose execution strategy based on whether MCP servers are provided
+        if input_model.mcp_servers:
+            # File-based execution with MCP tools
+            def _write_code():
+                container.exec_run(
+                    cmd=["sh", "-c", f"cat > /tmp/user_code.py << 'EOFCODE'\n{full_script}\nEOFCODE"],
+                    stdout=True,
+                    stderr=True
+                )
+
+            await loop.run_in_executor(self.executor, _write_code)  # type: ignore[arg-type]
+
+            # Prepare execution command with MCP configuration
+            cmd = ["python", "/app/sandbox/execute_with_mcp.py"]
+            environment = {
+                'USER_CODE_PATH': '/tmp/user_code.py',
+                'MCP_SERVERS_JSON': ModelSerializedMcpAdapter.dump_json(input_model.mcp_servers)
+            }
+        else:
+            # Inline execution without MCP
+            cmd = ["python", "-c", full_script]
+            environment = None
+
+        # Execute with unified execution logic
         def _exec():
             exit_code, output = container.exec_run(
-                cmd=["python", "-c", full_script],
+                cmd=cmd,
                 stdout=True,
                 stderr=True,
-                demux=True
+                demux=True,
+                environment=environment
             )
 
             stdout, stderr = output
@@ -1277,21 +1308,18 @@ class DurablePersistentContainerSandbox(PersistentContainerSandbox):
         return await super().get_python_state(input_model)
 
     @activity.defn
-    async def execute_python(self, input_model: ExecutePythonArgs) -> Dict[str, Any]:
+    async def execute_python(self,
+                             input_model: ExecutePythonArgs) -> Dict[str, Any]:
         """
         Execute Python code in the container with persistent state.
 
         Runs Python code with automatic state persistence. Variables created
         or modified in the code are saved and available in subsequent executions.
         Optionally inject variables into the execution environment.
-
-        Args:
-            input_model: Contains container_id, code (Python code string), persist_state (bool), and variables (dict).
-
         Returns:
             Dict[str, Any]: Result with 'success', 'output' (stdout), 'error' (stderr), and 'exit_code'.
         """
-        return await super().execute_python(input_model)
+        return await super().execute_python(input_model=input_model)
 
 
 class StatelessPersistentSandbox:
@@ -1388,7 +1416,9 @@ class StatelessPersistentSandbox:
             activity_name: str,
             return_type: Type[Any],
             input_type: Optional[Type[BaseModel]] = None,
-            description: Optional[str] = None):
+            description: Optional[str] = None,
+            mcp_servers: Optional[list[ModelSerializedMcp]] = None
+    ):
 
         if input_type is None:
             async def tool_func(ctx: RunContext[None]):
@@ -1409,8 +1439,37 @@ class StatelessPersistentSandbox:
                 'ctx': RunContext[None],
                 'return': return_type
             }
+        elif activity_name == 'execute_python':
+            async def tool_func(ctx: RunContext[None], input_model: input_type):
+
+                if isinstance(input_model, dict):
+                    activity_args_input = SandboxTaskArgsAdapter.validate_python(input_model)
+                else:
+                    activity_args_input = input_model
+
+                if isinstance(activity_args_input, ExecutePythonArgs):
+                    activity_args_input.mcp_servers = mcp_servers
+
+                child_workflow_id = f"{activity.info().workflow_id}-{activity_name}-{activity.info().activity_id}"
+                return await activity.client().execute_workflow(
+                    id=child_workflow_id,
+                    workflow='SandboxWorkflow',
+                    task_queue=activity.info().task_queue,
+                    result_type=return_type,
+                    id_conflict_policy=WorkflowIDConflictPolicy.TERMINATE_EXISTING,
+                    args=[SandboxInputTask(task_name=SandboxTaskTypes(activity_name), task_args=activity_args_input)]
+                )
+
+            params = [
+                inspect.Parameter('ctx', inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=RunContext[None]),
+                inspect.Parameter('input_model', inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=input_type)
+            ]
+            annotations = {
+                'ctx': RunContext[None],
+                'input_model': input_type,
+                'return': return_type
+            }
         else:
-            # No type hint here - we set it manually via annotations
             async def tool_func(ctx: RunContext[None], input_model: input_type):
 
                 if isinstance(input_model, dict):
@@ -1452,7 +1511,8 @@ class StatelessPersistentSandbox:
     async def instrument_agent(
             self,
             agent: Agent,
-            blacklist: Sequence[str] = None
+            blacklist: Sequence[str] = None,
+            mcp_servers: Optional[list[ModelSerializedMcp]] = None,
     ):
         """
         Instrument a PydanticAI agent with all sandbox activities as tools.
@@ -1472,7 +1532,8 @@ class StatelessPersistentSandbox:
                 activity_name=activity_name,
                 input_type=metadata['input_type'],
                 return_type=metadata['return_type'],
-                description=metadata.get('description')
+                description=metadata.get('description'),
+                mcp_servers=mcp_servers,
             )
             agent.tool(name=activity_name, strict=True)(tool_func)
 

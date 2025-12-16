@@ -49,6 +49,7 @@ from temporalio.worker import Worker
 
 from temporal.pydanticai.codeact.activities.common import get_prompts, get_configs, \
     render_jinja
+from temporal.pydanticai.codeact.activities.mcp_functions import extract_mcp_tools_as_functions
 from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import DurablePersistentContainerSandbox
 from temporal.pydanticai.codeact.workflows.sandbox_workflow import SandboxWorkflow
 
@@ -151,7 +152,7 @@ class CodeActWorkerRunner:
             activities = []
         default_workflows = [SandboxWorkflow]
         sandbox_activities = persistent_sandbox or DurablePersistentContainerSandbox()
-        utils_activities = [get_prompts, get_configs, render_jinja]
+        utils_activities = [get_prompts, get_configs, render_jinja, extract_mcp_tools_as_functions]
         worker = Worker(
             temporal_client,
             task_queue=task_queue,
