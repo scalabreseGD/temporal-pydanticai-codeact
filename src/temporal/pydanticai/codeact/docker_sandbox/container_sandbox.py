@@ -1440,8 +1440,7 @@ class StatelessPersistentSandbox:
                 'return': return_type
             }
         elif activity_name == 'execute_python':
-            # No type hint here - we set it manually via annotations
-            async def tool_func(ctx: RunContext[None], input_model):
+            async def tool_func(ctx: RunContext[None], input_model: input_type):
 
                 if isinstance(input_model, dict):
                     activity_args_input = SandboxTaskArgsAdapter.validate_python(input_model)
@@ -1471,7 +1470,6 @@ class StatelessPersistentSandbox:
                 'return': return_type
             }
         else:
-            # No type hint here - we set it manually via annotations
             async def tool_func(ctx: RunContext[None], input_model: input_type):
 
                 if isinstance(input_model, dict):

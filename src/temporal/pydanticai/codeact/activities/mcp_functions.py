@@ -131,7 +131,7 @@ async def extract_mcp_tools_as_functions(
     """Extract tools from an MCP server and return them as Python function signatures.
 
     Args:
-        server: An instance of MCPServerStdio, MCPServerStreamableHTTP, or MCPServerSSE
+        mcp_configs: An instance of MCPServerStdio, MCPServerStreamableHTTP, or MCPServerSSE
 
     Returns:
         A list of Python function signature strings
