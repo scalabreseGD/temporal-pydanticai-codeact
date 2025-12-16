@@ -117,6 +117,7 @@ Docker containers with:
 - `_build_agent()` - Construct PydanticAI agent
 - `wrap_agent()` - Wrap for Temporal execution
 - `_get_mcp_toolsets()` - Load MCP tools (extensibility point)
+- `_get_custom_functions()` - Define custom functions for sandbox injection (extensibility point)
 
 ### Workflow Architecture
 
@@ -186,7 +187,8 @@ Docker containers with:
    ```
    Workflow → Load prompts from activity
    Workflow → Load model config from activity
-   Workflow → Build SimpleAgent with sandbox tools
+   Workflow → Serialize custom functions (if defined)
+   Workflow → Build SimpleAgent with sandbox tools and custom functions
    ```
 
 4. **Agent Execution**
@@ -239,7 +241,7 @@ When an agent calls `execute_python`:
 6. PersistentContainerSandbox Core
    container.exec_run([
        "python", "-c",
-       load_state + user_code + save_state
+       load_state + custom_functions + user_code + save_state
    ])
 
 7. Return Result

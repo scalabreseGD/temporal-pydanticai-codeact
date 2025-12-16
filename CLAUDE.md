@@ -124,7 +124,7 @@ from temporal.pydanticai.codeact.datamodels.sandbox import ExecutePythonArgs
 from temporal.pydanticai.codeact.workflows.simple_agent_workflow import SimpleAgentWorkflow
 
 # Activities and utilities
-from temporal.pydanticai.codeact.activities.common import load_config, get_temporal_client
+from temporal.pydanticai.codeact.utils.common_utils import load_config, get_temporal_client
 
 # Workers
 from temporal.pydanticai.codeact.workers.sandbox_worker import CodeActWorkerRunner
@@ -306,6 +306,233 @@ signatures = await extract_mcp_tools_as_functions(serialized)
 - Hard-code tool signatures in prompts (use `{{ tools_as_func }}` instead)
 - Mix agent-level and sandbox-level MCP for same tools (choose one approach)
 - Forget that containers need network access for `uvx` to install MCP servers
+
+## Custom Functions Integration
+
+### Overview
+
+Custom functions allow you to define reusable Python functions in your codebase that are automatically serialized and injected into the sandbox execution environment. Unlike MCP tools (which integrate external services), custom functions are for business logic, data processing utilities, and reusable computations defined directly in your code.
+
+**Key Features:**
+- ✅ **Automatic Serialization** - Functions extracted using `inspect.getsource()`
+- ✅ **Dependency Detection** - AST parsing automatically detects required packages
+- ✅ **Sync Wrappers** - Async functions automatically wrapped for synchronous use
+- ✅ **Full Docstrings** - Function signatures include complete documentation
+- ✅ **Auto-Installation** - Dependencies installed automatically in containers
+
+### Creating an Agent with Custom Functions
+
+```python
+from temporal.pydanticai.codeact.agents.base.code_act_agent import CodeActAgent
+
+class DataAnalysisAgent(CodeActAgent):
+    """Agent with custom data processing functions."""
+    agent_name = 'data_analysis_agent'
+
+    @staticmethod
+    async def _get_custom_functions(**kwargs) -> list:
+        """Define custom functions for this agent."""
+
+        async def analyze_dataframe(data_json: str) -> dict:
+            """
+            Analyze a pandas DataFrame from JSON.
+
+            Args:
+                data_json: JSON string representing the dataframe
+
+            Returns:
+                Dictionary with statistical analysis
+            """
+            import pandas as pd
+            import numpy as np
+
+            df = pd.read_json(data_json)
+            return {
+                'mean': df.mean().to_dict(),
+                'median': df.median().to_dict(),
+                'correlation': df.corr().to_dict()
+            }
+
+        def format_table(data: dict) -> str:
+            """Format dictionary as markdown table."""
+            import pandas as pd
+            df = pd.DataFrame([data])
+            return df.to_markdown(index=False)
+
+        return [analyze_dataframe, format_table]
+```
+
+### Configuring Agent Prompts
+
+```yaml
+# agent_prompts.yml
+data_analysis_agent:
+  system_prompt: "You are a data analysis assistant."
+  instructions: |
+    ## Custom Helper Functions
+
+    {% if custom_functions_signatures %}
+    The following helper functions are available:
+
+    {% for sig in custom_functions_signatures %}
+    ```python
+    {{ sig }}
+    ```
+    {% endfor %}
+
+    Call these directly in your execute_python code!
+    {% endif %}
+```
+
+### What Happens Internally
+
+1. `_build_agent()` calls `_get_custom_functions()`
+2. Functions serialized with `serialize_functions()`
+   - Source code extracted via `inspect.getsource()`
+   - Dependencies detected via AST parsing
+   - **Async functions wrapped with sync wrappers**
+   - **Signatures include full docstrings**
+3. Signatures passed to `instructions()` as `custom_functions_signatures`
+4. Serialized functions passed to sandbox tools
+5. On execution:
+   - Dependencies installed: `pip install {packages}`
+   - Function code injected before user code
+   - Functions available in sandbox namespace
+
+### Sync Wrappers for Async Functions
+
+**Important:** Async functions are **automatically wrapped** with synchronous wrappers:
+
+```python
+# You define:
+async def search_web(query: str) -> list:
+    """Search the web."""
+    from duckduckgo_search import DDGS
+    return DDGS().text(query)
+
+# Agents see and use (NO await needed):
+def search_web(query: str) -> list:
+    """Search the web."""
+    # Sync wrapper automatically generated
+
+# In sandbox code, agents can write:
+results = search_web("python")  # Just works!
+```
+
+The system generates a sync wrapper that:
+- Renames original to `__async_{function_name}`
+- Creates sync version with same signature
+- Uses `asyncio.run()` to call async version
+- Handles event loop scenarios automatically
+- Adds `nest_asyncio` as dependency
+
+### Docstrings in Signatures
+
+Function signatures **include complete docstrings** to provide agents with full context:
+
+```python
+# Agents see:
+def analyze_dataframe(data_json: str) -> dict:
+    """
+    Analyze a pandas DataFrame from JSON.
+
+    Args:
+        data_json: JSON string representing the dataframe
+
+    Returns:
+        Dictionary with statistical analysis
+    """
+```
+
+This helps agents understand:
+- What the function does
+- Parameter meanings and types
+- Return value structure
+- Usage examples (if included in docstring)
+
+### Usage in Sandbox Code
+
+Once defined, agents can use custom functions directly:
+
+```python
+# Agent generates code like:
+data = '[{"sales": 100}, {"sales": 200}]'
+stats = analyze_dataframe(data)  # Custom function
+table = format_table(stats)      # Another custom function
+print(table)
+```
+
+### Dependencies
+
+Dependencies are **automatically detected and installed**:
+
+```python
+async def use_advanced_libs(data: str) -> dict:
+    """Function using multiple libraries."""
+    import pandas as pd      # Detected!
+    import numpy as np       # Detected!
+    from scipy import stats  # Detected!
+    import os               # Filtered (stdlib)
+
+    # System will: pip install pandas numpy scipy
+    df = pd.read_json(data)
+    return stats.describe(df)
+```
+
+### Best Practices
+
+✅ **Do:**
+- Define functions as static methods (can reference via `MyAgent.helper_func`)
+- Include comprehensive docstrings with Args/Returns
+- Keep imports inside function bodies
+- Use type hints for better agent understanding
+- Test functions independently
+
+❌ **Don't:**
+- Rely on external file dependencies
+- Use module-level state/globals
+- Create closures over non-serializable objects
+- Mix custom functions with MCP for same functionality
+
+### Custom Functions vs MCP Tools
+
+| Aspect | Custom Functions | MCP Tools |
+|--------|-----------------|-----------|
+| **Purpose** | Business logic, reusable utilities | External services, system integration |
+| **Definition** | In your Python codebase | External MCP servers |
+| **Version Control** | Committed with code | External dependencies |
+| **Async Handling** | Automatic sync wrappers | Handled by MCP executor |
+| **Best For** | Data processing, calculations | Time, fetch, filesystem ops |
+
+### Example: Real-World Usage
+
+See `src/example/agents/simple_agent.py` for a complete example:
+
+```python
+class SimpleAgent(CodeActAgent):
+    @staticmethod
+    async def _get_custom_functions(**kwargs) -> list:
+        return [SimpleAgent.duckduckgo_text_search]
+
+    @staticmethod
+    async def duckduckgo_text_search(query: str, max_results: int = 5) -> list:
+        """
+        Performs a text search using DuckDuckGo.
+
+        Returns list of dicts with 'title', 'url', 'preview'
+        """
+        from duckduckgo_search import DDGS
+        ddgs = DDGS()
+        results = ddgs.text(keywords=query, max_results=max_results)
+        return [{'title': r.get('title'), 'url': r.get('href')} for r in results]
+```
+
+### Documentation
+
+For comprehensive details, see:
+- `docs/custom_functions.md` - Complete guide with examples
+- `docs/sync_wrapper_implementation.md` - Technical details on sync wrappers
+- `examples/data_analysis_agent.py` - Full example with multiple functions
 
 ## Common Patterns
 

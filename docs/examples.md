@@ -9,6 +9,7 @@ Real-world examples demonstrating Code Act PydanticAI capabilities.
 3. [Multi-Step Calculation](#3-multi-step-calculation-with-state)
 4. [Direct Sandbox Usage](#4-direct-sandbox-usage-no-agent)
 5. [Custom Agent](#5-custom-agent-extension)
+6. [Custom Functions](#6-custom-functions-with-dependency-detection)
 
 ---
 
@@ -244,7 +245,8 @@ class DataScienceAgent(CodeActAgent):
     agent_name = 'data_science_agent'
 
     # Could override methods to add custom behavior:
-    # - Custom MCP tools
+    # - Custom MCP tools via _get_mcp_toolsets()
+    # - Custom functions via _get_custom_functions()
     # - Specialized system prompt
     # - Pre-configured packages
 ```
@@ -311,6 +313,95 @@ class DataScienceWorkflow(CodeActAgentWorkflow):
         finally:
             await self.stop_sandbox_container()
 ```
+
+## 6. Custom Functions with Dependency Detection
+
+Define reusable functions with automatic dependency installation.
+
+```python
+# examples/data_analysis_agent.py
+from temporalio import workflow
+
+with workflow.unsafe.imports_passed_through():
+    from agents.base.code_act_agent import CodeActAgent
+
+class DataAnalysisAgent(CodeActAgent):
+    """Agent with custom functions for data analysis."""
+    agent_name = 'data_analysis_agent'
+
+    @staticmethod
+    async def _get_custom_functions(**kwargs) -> list:
+        """Define custom functions for this agent."""
+
+        async def analyze_dataframe(data_json: str) -> dict:
+            """
+            Analyze a pandas DataFrame from JSON.
+
+            Args:
+                data_json: JSON string representing the dataframe
+
+            Returns:
+                Dictionary with statistical analysis
+            """
+            import pandas as pd
+            import numpy as np
+
+            df = pd.read_json(data_json)
+            return {
+                'mean': df.mean().to_dict(),
+                'median': df.median().to_dict(),
+                'std': df.std().to_dict(),
+                'correlation': df.corr().to_dict()
+            }
+
+        def format_results(data: dict) -> str:
+            """Format analysis results as markdown."""
+            lines = ["## Analysis Results", ""]
+            for key, value in data.items():
+                lines.append(f"### {key.title()}")
+                lines.append(f"```{value}```")
+                lines.append("")
+            return "\\n".join(lines)
+
+        return [analyze_dataframe, format_results]
+```
+
+**Key Features:**
+
+- ✅ Async functions automatically wrapped (no `await` needed in sandbox!)
+- ✅ Dependencies detected via AST (pandas, numpy auto-installed)
+- ✅ Full docstrings shown to agents for better understanding
+- ✅ Functions available across all agent executions
+
+**Agent sees this in instructions:**
+
+```python
+def analyze_dataframe(data_json: str) -> dict:
+    """
+    Analyze a pandas DataFrame from JSON.
+
+    Args:
+        data_json: JSON string representing the dataframe
+
+    Returns:
+        Dictionary with statistical analysis
+    """
+
+def format_results(data: dict) -> str:
+    """Format analysis results as markdown."""
+```
+
+**Agent can use them directly:**
+
+```python
+# Agent generates code like this - NO await needed!
+data = '[{"a": 1, "b": 2}, {"a": 3, "b": 4}]'
+analysis = analyze_dataframe(data)  # Works synchronously
+output = format_results(analysis)
+print(output)
+```
+
+See the complete example in `examples/data_analysis_agent.py` and full documentation in [docs/custom_functions.md](custom_functions.md).
 
 ---
 

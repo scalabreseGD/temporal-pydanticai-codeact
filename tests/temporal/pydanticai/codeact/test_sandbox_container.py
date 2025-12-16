@@ -5,10 +5,10 @@ Tests PersistentContainerSandbox class in src/docker_sandbox/container_sandbox.p
 Uses mocks to avoid requiring actual Docker daemon.
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
-from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import PersistentContainerSandbox
+import pytest
+
 from temporal.pydanticai.codeact.datamodels.sandbox import (
     StartContainerArgs,
     ExecutePythonArgs,
@@ -19,6 +19,7 @@ from temporal.pydanticai.codeact.datamodels.sandbox import (
     ReadVariableInStateArgs,
     InstallAdditionalPackagesArgs,
 )
+from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import PersistentContainerSandbox
 
 
 @pytest.mark.unit
@@ -46,7 +47,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_start_container_with_python_packages(
-        self, sandbox, mock_docker_client
+            self, sandbox, mock_docker_client
     ):
         """Test starting container with Python packages."""
         args = StartContainerArgs(python_packages=["numpy", "pandas"])
@@ -58,7 +59,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_start_container_with_system_packages(
-        self, sandbox, mock_docker_client
+            self, sandbox, mock_docker_client
     ):
         """Test starting container with system packages."""
         args = StartContainerArgs(system_packages=["git", "curl"])
@@ -85,7 +86,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_restart_container(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test restarting container."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -99,7 +100,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_execute_python_simple(
-        self, sandbox, mock_docker_client, mock_container_id, sample_python_code
+            self, sandbox, mock_docker_client, mock_container_id, sample_python_code
     ):
         """Test executing simple Python code."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -120,7 +121,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_execute_python_with_error(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test executing Python code that produces error."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -143,7 +144,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_execute_python_with_variables(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test executing Python with variable injection."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -167,7 +168,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_execute_python_persist_state_false(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test executing Python without state persistence."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -189,7 +190,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_execute_bash_simple(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test executing simple bash command."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -209,7 +210,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_execute_bash_with_error(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test executing bash command that fails."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -231,7 +232,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_get_python_state(
-        self, sandbox, mock_docker_client, mock_container_id, sample_python_state
+            self, sandbox, mock_docker_client, mock_container_id, sample_python_state
     ):
         """Test getting Python state."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -253,7 +254,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_list_state_variables(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test listing state variables."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -272,7 +273,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_read_state_variable(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test reading specific state variable."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -295,7 +296,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_clear_python_state(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test clearing Python state."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -371,7 +372,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_get_container_info(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test getting container information."""
         mock_container = mock_docker_client.containers.get.return_value
@@ -413,7 +414,7 @@ class TestPersistentContainerSandbox:
 
     @pytest.mark.asyncio
     async def test_install_additional_packages(
-        self, sandbox, mock_docker_client, mock_container_id
+            self, sandbox, mock_docker_client, mock_container_id
     ):
         """Test installing additional packages."""
         mock_container = mock_docker_client.containers.get.return_value
