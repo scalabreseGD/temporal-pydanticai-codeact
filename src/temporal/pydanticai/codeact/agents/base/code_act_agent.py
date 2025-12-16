@@ -28,6 +28,7 @@ with workflow.unsafe.imports_passed_through():
     from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
     from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentDeps
     from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import StatelessPersistentSandbox
+    from temporal.pydanticai.codeact.utils.function_serializer import serialize_functions
 
 
 class CodeActAgent(BaseAgent):
@@ -162,6 +163,7 @@ class CodeActAgent(BaseAgent):
             to the agent as these are managed by CodeActAgentWorkflow.
         """
 
+        # Process MCP toolsets
         toolsets = await self._get_mcp_toolsets(**kwargs)
         wrapped_toolsets = [w.wrapped for w in toolsets.values()]
         serialized_servers = serialize_mcp_servers(wrapped_toolsets)
@@ -177,6 +179,18 @@ class CodeActAgent(BaseAgent):
         else:
             tools_as_func = None
 
+        # Process custom functions
+        custom_funcs = await self._get_custom_functions(**kwargs)
+        if custom_funcs:
+            custom_functions_config = serialize_functions(custom_funcs)
+            custom_functions_signatures = custom_functions_config.get_all_signatures()
+        else:
+            custom_functions_config = None
+            custom_functions_signatures = None
+
+        if custom_functions_signatures:
+            tools_as_func.extend(custom_functions_signatures)
+
         serverless_sandbox = StatelessPersistentSandbox()
         code_sandbox_tools = await serverless_sandbox.code_sandbox_tools(
             blacklist=[
@@ -187,7 +201,8 @@ class CodeActAgent(BaseAgent):
                 'get_all_containers',
                 'cleanup_containers'
             ],
-            mcp_servers=serialized_servers
+            mcp_servers=serialized_servers,
+            custom_functions=custom_functions_config
         )
         if not tools:
             tools = []
@@ -195,10 +210,13 @@ class CodeActAgent(BaseAgent):
         tools.extend(code_sandbox_tools)
 
         base_agent = Agent(name=self.agent_name,
-                           model=self._get_llm_model(agent_builder.model_configs),
-                           tools=code_sandbox_tools if tools is None else code_sandbox_tools + tools,
+                           model=await self._get_llm_model(agent_builder.model_configs),
+                           tools=tools,
                            system_prompt=self.system_prompt,
-                           instructions=self.instructions(tools_as_func=tools_as_func),
+                           instructions=self.instructions(
+                               tools_as_func=tools_as_func,
+                               custom_functions_signatures=custom_functions_signatures
+                           ),
                            event_stream_handler=event_stream_handler,
                            deps_type=self.deps_type,
                            output_type=self.output_type

@@ -81,6 +81,26 @@ class BaseAgent:
     async def _get_mcp_toolsets(**env_vars) -> dict[str, WrapperToolset]:
         return {}
 
+    @staticmethod
+    async def _get_custom_functions(**kwargs) -> list:
+        """
+        Hook for subclasses to provide custom functions for sandbox injection.
+
+        Returns:
+            List of callable functions to be serialized and injected into sandbox.
+            Default implementation returns an empty list.
+
+        Example:
+            >>> @staticmethod
+            >>> async def _get_custom_functions(**kwargs):
+            >>>     async def analyze_data(data: str) -> dict:
+            >>>         import pandas as pd
+            >>>         df = pd.read_json(data)
+            >>>         return {'mean': df.mean().to_dict()}
+            >>>     return [analyze_data]
+        """
+        return []
+
     async def _build_agent(self,
                            agent_builder: AgentBuilder,
                            event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,

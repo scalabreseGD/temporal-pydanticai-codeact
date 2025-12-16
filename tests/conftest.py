@@ -5,17 +5,14 @@ This module provides common fixtures and configuration used across all tests,
 including mock objects for Docker, Temporal, and agent components.
 """
 
-import asyncio
 import os
 import sys
 from pathlib import Path
 from typing import AsyncGenerator, Dict, Any
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Worker
-
 
 # Test configuration paths
 TEST_DIR = Path(__file__).parent

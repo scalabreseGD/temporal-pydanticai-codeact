@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 import docker
+from docker.errors import NotFound
 from dotenv import load_dotenv, find_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse, HTMLResponse
@@ -23,9 +24,9 @@ from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
 from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.common import WorkflowIDConflictPolicy
 
-from temporal.pydanticai.codeact.activities.common import load_config, get_temporal_client, create_unique_id
 from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentOutput
 from temporal.pydanticai.codeact.docker_sandbox.container_sandbox import PersistentContainerSandbox
+from temporal.pydanticai.codeact.utils.common_utils import get_temporal_client, create_unique_id, load_config
 
 load_dotenv(find_dotenv())
 
@@ -208,7 +209,7 @@ async def download_file(
         # This returns a tar archive containing the file
         try:
             bits, stat = container.get_archive(file_path)
-        except docker.errors.NotFound:
+        except NotFound:
             raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error accessing file: {str(e)}")

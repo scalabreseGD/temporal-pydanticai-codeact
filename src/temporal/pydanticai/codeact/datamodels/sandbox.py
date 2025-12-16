@@ -13,6 +13,7 @@ import pydantic
 from pydantic import BaseModel, Field, TypeAdapter
 
 from temporal.pydanticai.codeact.datamodels.mcp_tools import ModelSerializedMcp
+from temporal.pydanticai.codeact.datamodels.custom_functions import CustomFunctionsConfig
 
 
 class SandboxTaskTypes(StrEnum):
@@ -120,8 +121,8 @@ class ExecutePythonArgs(SandboxBaseArgs):
     """
     Arguments for executing Python code in a sandbox container.
 
-    Supports variable injection and optional state persistence. Code runs
-    in the container's Python environment with access to all installed packages.
+    Supports variable injection, custom function injection, and optional state persistence.
+    Code runs in the container's Python environment with access to all installed packages.
 
     Attributes:
         container_id: Container where code will execute.
@@ -130,6 +131,10 @@ class ExecutePythonArgs(SandboxBaseArgs):
             environment. These become global variables in the script.
         persist_state: If True, save all non-private variables after execution.
             Defaults to True. Set to False for read-only operations.
+        mcp_servers: Optional list of MCP servers to make tools available.
+        custom_functions: Optional configuration of custom functions to inject.
+            Functions will be available in the execution namespace with their
+            dependencies automatically installed.
         kind: Literal discriminator for union type resolution.
     """
     code: str
@@ -138,6 +143,7 @@ class ExecutePythonArgs(SandboxBaseArgs):
     persist_state: Optional[bool] = Field(default=True,
                                           description="If true, persist state in the container. Defaults to True")
     mcp_servers: Optional[list[ModelSerializedMcp]] = Field(default=None, description="List of MCP servers. Don't populate it during tool call. Defaults to None")
+    custom_functions: Optional[CustomFunctionsConfig] = Field(default=None, description="Custom functions to inject into execution environment. Don't populate it during tool call. Defaults to None")
     kind: Literal['execute_python'] = Field(default='execute_python')
 
 

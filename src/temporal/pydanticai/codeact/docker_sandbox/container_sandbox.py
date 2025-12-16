@@ -28,7 +28,7 @@ from typing import Dict, Any, List, Type, get_type_hints, Optional, Sequence
 import docker
 from docker.errors import ImageNotFound
 from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext, Tool
+from pydantic_ai import RunContext, Tool
 from pydantic_ai._run_context import AgentDepsT
 from temporalio import activity
 from temporalio.common import WorkflowIDConflictPolicy
@@ -40,6 +40,7 @@ from temporal.pydanticai.codeact.datamodels.sandbox import StartContainerArgs, S
     InstallAdditionalPackagesArgs, ReadOperationsArgs
 from .sandbox import SANDBOX_DIR, DOCKERFILE_PATH
 from ..datamodels.mcp_tools import ModelSerializedMcp, ModelSerializedMcpAdapter
+from ..utils.function_serializer import generate_injection_script
 
 
 class PersistentContainerSandbox:
@@ -427,7 +428,7 @@ class PersistentContainerSandbox:
             }
 
     def _build_execution_script(self, input_model: ExecutePythonArgs) -> str:
-        """Build the complete Python script with state management and variable injection."""
+        """Build the complete Python script with state management, variable injection, and custom functions."""
         load_state_script = (self.sandbox_dir / "load_state.py").read_text()
         save_state_script = (self.sandbox_dir / "save_state.py").read_text()
 
@@ -435,6 +436,11 @@ class PersistentContainerSandbox:
 
         if input_model.persist_state:
             script_parts.append(load_state_script)
+
+        # Inject custom functions before user code
+        if input_model.custom_functions:
+            custom_functions_script = generate_injection_script(input_model.custom_functions)
+            script_parts.append(custom_functions_script)
 
         if input_model.variables:
             script_parts.append("import json")
@@ -448,16 +454,58 @@ class PersistentContainerSandbox:
 
         return "\n".join(script_parts)
 
+    async def _install_function_dependencies(self, container: Any, dependencies: List[str]) -> None:
+        """
+        Install Python package dependencies for custom functions in the container.
+
+        Args:
+            container: Docker container object
+            dependencies: List of package names to install
+
+        Raises:
+            RuntimeError: If package installation fails
+        """
+        if not dependencies:
+            return
+
+        loop = asyncio.get_event_loop()
+
+        def _install():
+            exit_code, output = container.exec_run(
+                cmd=["pip", "install", "--quiet"] + dependencies,
+                stdout=True,
+                stderr=True,
+                demux=True
+            )
+
+            if exit_code != 0:
+                stdout, stderr = output
+                stderr_str = stderr.decode('utf-8') if stderr else ""
+                raise RuntimeError(
+                    f"Failed to install dependencies {dependencies}: {stderr_str}"
+                )
+
+        try:
+            await loop.run_in_executor(self.executor, _install)  # type: ignore[arg-type]
+        except Exception as e:
+            raise RuntimeError(f"Error installing dependencies: {e}")
+
     async def execute_python(
             self,
             input_model: ExecutePythonArgs
     ) -> Dict[str, Any]:
-        """Execute Python code in the specified container with persistent state and optional MCP tools"""
+        """Execute Python code in the specified container with persistent state, optional MCP tools, and custom functions"""
         container = self._get_container_by_id(input_model.container_id)
         if not container:
             raise ValueError(f"Container {input_model.container_id} not found")
 
         loop = asyncio.get_event_loop()
+
+        # Install dependencies for custom functions if provided
+        if input_model.custom_functions:
+            dependencies = input_model.custom_functions.get_all_dependencies()
+            if dependencies:
+                await self._install_function_dependencies(container, dependencies)
 
         # Build the complete script with state management
         full_script = self._build_execution_script(input_model)
@@ -1418,7 +1466,8 @@ class StatelessPersistentSandbox:
             return_type: Type[Any],
             input_type: Optional[Type[BaseModel]] = None,
             description: Optional[str] = None,
-            mcp_servers: Optional[list[ModelSerializedMcp]] = None
+            mcp_servers: Optional[list[ModelSerializedMcp]] = None,
+            custom_functions: Optional['CustomFunctionsConfig'] = None
     ):
 
         if input_type is None:
@@ -1450,6 +1499,7 @@ class StatelessPersistentSandbox:
 
                 if isinstance(activity_args_input, ExecutePythonArgs):
                     activity_args_input.mcp_servers = mcp_servers
+                    activity_args_input.custom_functions = custom_functions
 
                 child_workflow_id = f"{activity.info().workflow_id}-{activity_name}-{activity.info().activity_id}"
                 return await activity.client().execute_workflow(
@@ -1513,18 +1563,20 @@ class StatelessPersistentSandbox:
             self,
             blacklist: Sequence[str] = None,
             mcp_servers: Optional[list[ModelSerializedMcp]] = None,
+            custom_functions: Optional['CustomFunctionsConfig'] = None,
     ) -> list[Tool[AgentDepsT]]:
         """
         Provide all sandbox activities as tools.
-        Accepts also the mcp servers that will be used during the code execution.
+        Accepts also the mcp servers and custom functions that will be used during the code execution.
 
         Args:
             blacklist: List of activity names to exclude
             mcp_servers: List of ModelSerializedMcp instances to use
+            custom_functions: CustomFunctionsConfig with functions to inject
 
         Example:
             agent = Agent('openai:gpt-4')
-            code_sandbox_tools(blacklist=['cleanup_containers'],m)
+            code_sandbox_tools(blacklist=['cleanup_containers'], custom_functions=my_functions)
         """
         activities = self.__extract_activities(blacklist=blacklist)
 
@@ -1536,6 +1588,7 @@ class StatelessPersistentSandbox:
                 return_type=metadata['return_type'],
                 description=metadata.get('description'),
                 mcp_servers=mcp_servers,
+                custom_functions=custom_functions,
             )
             tools.append(Tool(function=tool_func, name=activity_name, strict=True))
             # agent.tool(name=activity_name, strict=True)(tool_func)

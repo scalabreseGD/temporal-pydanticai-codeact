@@ -5,13 +5,14 @@ This module provides SimpleAgent, a minimal concrete implementation of
 CodeActAgent with all default settings. Use this for basic code execution
 tasks that don't require custom configuration.
 """
-from pydantic_ai import WrapperToolset
+
+from pydantic_ai import WrapperToolset, RetryPromptPart
+from pydantic_ai.exceptions import ToolRetryError
 from pydantic_ai.mcp import MCPServerStdio
 from temporalio import workflow
 
-from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentOutput
-
 with workflow.unsafe.imports_passed_through():
+    from temporal.pydanticai.codeact.datamodels.codeact import CodeActAgentOutput
     from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
     from pydantic_ai.providers.google import GoogleProvider
     from temporal.pydanticai.codeact.agents.base.code_act_agent import CodeActAgent
@@ -49,6 +50,10 @@ class SimpleAgent(CodeActAgent):
             lambda ctx, tool_def: True)
         return {'fetch': fetch_mcp}
 
+    @staticmethod
+    async def _get_custom_functions(**kwargs) -> list:
+        return [SimpleAgent.duckduckgo_text_search]
+
     async def _get_llm_model(self, model_configs):
         """
         Create and configure a Google Gemini language model.
@@ -74,3 +79,51 @@ class SimpleAgent(CodeActAgent):
             settings=GoogleModelSettings(**settings)
         )
         return model
+
+    @staticmethod
+    async def duckduckgo_text_search(query: str, max_results: int = 5) -> list[dict[str, str]]:
+        from duckduckgo_search import DDGS
+        """
+            Performs a text search using DuckDuckGo and returns a list of results with the format:
+                {
+                    'title': Page Title,
+                    'url': The URL of the page,
+                    'preview': The first 100 characters of the page,
+                }
+
+            Args:
+                query (str): The search term.
+                max_results (int): The maximum number of results to return.
+                
+            Returns:
+                list[dict[str, str]]: A list of search results dictionaries.
+            """
+
+        # Initialize the DDGS object (DuckDuckGo Search)
+        ddgs = DDGS()
+
+        # Perform the text search
+        # The 'text' method returns a generator of results
+        try:
+            search_results = ddgs.text(
+                keywords=query,
+                region='us-en',  # Example region
+                max_results=max_results
+            )
+
+            results_list = list(search_results)
+
+            if not results_list:
+                return []
+
+            result_dicts = []
+            for result in results_list:
+                result_dicts.append({
+                    'title': result.get('title'),
+                    'url': result.get('href'),
+                    'preview': result.get('body', '')[:100],
+                })
+
+            return result_dicts
+        except Exception as e:
+            raise ToolRetryError(tool_retry=RetryPromptPart(content=str(e)))

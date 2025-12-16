@@ -22,6 +22,7 @@ A reusable library for building intelligent agents with safe code execution capa
 🛠️ **Flexible Tools** - Agents can execute Python, run bash commands, manage files, and query state
 📦 **Dynamic Packages** - Install Python and system packages on-demand during execution
 🔌 **MCP Integration** - Native support for Model Context Protocol servers as agent tools
+⚙️ **Custom Functions** - Serialize and inject reusable functions with automatic dependency detection
 🌐 **Multi-Host Support** - Optional NFS volumes for shared state across multiple workers
 🎨 **Extensible Design** - Easy to create custom agents with specialized capabilities
 
@@ -107,11 +108,13 @@ simple_agent:
 
 ```python
 import asyncio
-from temporal.pydanticai.codeact.activities.common import load_config, get_temporal_client
+from temporal.pydanticai.codeact.activities.common import get_temporal_client
+from temporal.pydanticai.codeact.utils.common_utils import load_config
 from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
 from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
 from temporal.pydanticai.codeact.workflows.simple_agent_workflow import SimpleAgentWorkflow
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
+
 
 async def main():
     # Connect to Temporal
@@ -129,6 +132,7 @@ async def main():
     )
 
     print(result)
+
 
 asyncio.run(main())
 ```
@@ -302,11 +306,13 @@ Create a worker script (e.g., `my_worker.py`):
 import asyncio
 import os
 from temporal.pydanticai.codeact.workers.sandbox_worker import CodeActWorkerRunner
-from temporal.pydanticai.codeact.activities.common import load_config, get_temporal_client, read_prompts
+from temporal.pydanticai.codeact.activities.common import get_temporal_client
+from temporal.pydanticai.codeact.utils.common_utils import load_config, read_prompts
 from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
 from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
 from temporal.pydanticai.codeact.workflows.simple_agent_workflow import SimpleAgentWorkflow
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
+
 
 async def main():
     # Load configuration
@@ -337,6 +343,7 @@ async def main():
 
     await worker.run()
 
+
 if __name__ == '__main__':
     asyncio.run(main())
 ```
@@ -366,6 +373,7 @@ python run_sandbox_workflow.py
 - **[Architecture Guide](docs/architecture.md)** - System design, components, and patterns
 - **[Getting Started](docs/getting-started.md)** - Step-by-step tutorial for beginners
 - **[API Reference](docs/api-reference.md)** - Complete API documentation for all modules
+- **[Custom Functions Guide](docs/custom_functions.md)** - Serializing and injecting reusable functions
 - **[Sandbox Operations](docs/sandbox-operations.md)** - Detailed reference for all sandbox operations
 - **[Examples](docs/examples.md)** - Practical examples with explanations
 - **[Testing Guide](docs/testing.md)** - Comprehensive testing documentation
@@ -377,6 +385,7 @@ The `examples/` directory contains practical usage examples:
 
 - **`simple_agent_example.py`** - Basic agent instrumentation patterns
 - **`agent_with_sandbox_tools.py`** - Advanced tool configuration
+- **`data_analysis_agent.py`** - Custom functions with automatic dependency detection
 
 ## Development
 
@@ -817,6 +826,66 @@ class WebScrapingAgent(CodeActAgent):
 # Each agent has access to only its defined toolsets
 ```
 
+## Custom Functions
+
+**Custom functions** allow you to define reusable helper functions in your Python codebase that are automatically serialized, analyzed for dependencies, and injected into the sandbox execution environment.
+
+### Key Features
+
+⭐ **Automatic Sync Wrappers** - Async functions are automatically wrapped so they can be called synchronously (no `await` needed!)
+📚 **Full Docstrings in Signatures** - Agents see complete function documentation for better understanding
+📦 **Dependency Detection** - Python's AST module automatically detects required packages
+🔧 **Auto-Installation** - Dependencies are automatically installed in Docker containers
+♻️ **Reusable** - Define once, use across multiple agents and workflows
+
+### Quick Example
+
+```python
+from temporal.pydanticai.codeact.agents.base.code_act_agent import CodeActAgent
+
+class DataAnalysisAgent(CodeActAgent):
+    agent_name = 'data_analysis_agent'
+
+    @staticmethod
+    async def _get_custom_functions(**kwargs) -> list:
+        """Define custom functions for this agent."""
+
+        async def analyze_data(data_json: str) -> dict:
+            """Analyze data using pandas."""
+            import pandas as pd
+            import numpy as np
+
+            df = pd.read_json(data_json)
+            return {
+                'mean': df.mean().to_dict(),
+                'std': df.std().to_dict()
+            }
+
+        def format_output(data: dict) -> str:
+            """Format dictionary as markdown."""
+            return "\\n".join(f"- **{k}**: {v}" for k, v in data.items())
+
+        return [analyze_data, format_output]
+```
+
+Agents can then use these functions in their generated code **without using `await`**:
+
+```python
+# Agent generates code like this:
+data = '[{"a": 1, "b": 2}, {"a": 3, "b": 4}]'
+analysis = analyze_data(data)  # NO await needed! Async functions are wrapped
+output = format_output(analysis)
+print(output)
+```
+
+### Benefits
+
+- **vs. MCP Tools:** Custom functions are ideal for business logic and reusable utilities that you want to version control alongside your code
+- **vs. Inline Code:** Provides reusability, better testing, automatic dependency management, and clear documentation
+- **Simplicity:** Async functions work without `await` - the sync wrapper handles all event loop management
+
+For comprehensive documentation, see [Custom Functions Guide](docs/custom_functions.md).
+
 ## Persistent Storage
 
 The sandbox provides **automatic persistent storage** using Docker volumes, ensuring that Python variables and files survive container crashes, worker restarts, and even Docker daemon restarts.
@@ -1131,19 +1200,20 @@ temporal-pydanticai-codeact>=0.1.0
 ```
 
 **main.py:**
+
 ```python
 import asyncio
 import os
 from temporal.pydanticai.codeact.workers.sandbox_worker import CodeActWorkerRunner
 from temporal.pydanticai.codeact.activities.common import (
-    load_config,
-    get_temporal_client,
-    read_prompts
+    get_temporal_client
 )
+from temporal.pydanticai.codeact.utils.common_utils import load_config, read_prompts
 from temporal.pydanticai.codeact.agents.simple_agent import SimpleAgent
 from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
 from temporal.pydanticai.codeact.workflows.simple_agent_workflow import SimpleAgentWorkflow
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
+
 
 async def main():
     # Load configuration
@@ -1174,6 +1244,7 @@ async def main():
 
     print("Worker started. Press Ctrl+C to stop.")
     await worker.run()
+
 
 if __name__ == '__main__':
     asyncio.run(main())

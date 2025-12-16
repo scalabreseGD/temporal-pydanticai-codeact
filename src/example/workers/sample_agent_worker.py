@@ -18,7 +18,7 @@ from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
 
 from example.agents.simple_agent import SimpleAgent
 from example.workflows.simple_agent_workflow import SimpleAgentWorkflow
-from temporal.pydanticai.codeact.activities.common import load_config, get_temporal_client, read_prompts
+from temporal.pydanticai.codeact.utils.common_utils import load_config, read_prompts, get_temporal_client
 from temporal.pydanticai.codeact.datamodels.agent_builder import AgentBuilder
 from temporal.pydanticai.codeact.workers.sandbox_worker import CodeActWorkerRunner
 

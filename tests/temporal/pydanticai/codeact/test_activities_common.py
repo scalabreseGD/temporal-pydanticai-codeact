@@ -7,22 +7,19 @@ src/activities/common.py.
 
 import os
 import tempfile
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 import yaml
 
 from temporal.pydanticai.codeact.activities.common import (
-    load_config,
-    read_prompts,
     get_configs,
     get_prompts,
-    render_jinja,
-    get_temporal_client,
-    _resolve_env_vars,
+    render_jinja
 )
 from temporal.pydanticai.codeact.datamodels.prompts import Prompts, AgentPrompts
+from temporal.pydanticai.codeact.utils.common_utils import load_config, read_prompts, get_temporal_client, \
+    _resolve_env_vars
 
 
 @pytest.mark.unit
@@ -104,8 +101,8 @@ class TestLoadConfig:
 
         try:
             with patch.dict(
-                os.environ,
-                {"TEST_API_KEY": "secret123", "TEST_PORT": "8080", "TEST_NESTED": "nested_value"},
+                    os.environ,
+                    {"TEST_API_KEY": "secret123", "TEST_PORT": "8080", "TEST_NESTED": "nested_value"},
             ):
                 config = load_config(temp_path)
                 assert config["api_key"] == "secret123"
