@@ -15,11 +15,10 @@ import asyncio
 from datetime import timedelta
 from typing import List, Optional
 
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, Tool
 from pydantic_ai._run_context import AgentDepsT
-from pydantic_ai.agent import EventStreamHandler, NoneType, Instructions, Agent
+from pydantic_ai.agent import EventStreamHandler, Instructions, Agent
 from pydantic_ai.durable_exec.temporal import TemporalAgent
-from pydantic_ai.output import OutputSpec, OutputDataT
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
@@ -133,8 +132,7 @@ class CodeActAgent(BaseAgent):
 
     async def _build_agent(self, agent_builder: AgentBuilder,
                            event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
-                           deps_type: type[AgentDepsT] = NoneType,
-                           output_type: OutputSpec[OutputDataT] = str,
+                           tools: Tool[AgentDepsT] | None = None,
                            **kwargs):
         """
         Build a code-execution-enabled agent with sandbox tools and MCP integration.
@@ -153,8 +151,6 @@ class CodeActAgent(BaseAgent):
         Args:
             agent_builder: Configuration for building the agent (prompts, model, etc.).
             event_stream_handler: Optional handler for streaming agent events.
-            deps_type: Type of dependencies (unused, kept for signature compatibility).
-            output_type: Type of agent output (unused, kept for signature compatibility).
             **kwargs: Additional arguments passed to base agent builder and MCP setup.
 
         Returns:
@@ -181,29 +177,33 @@ class CodeActAgent(BaseAgent):
         else:
             tools_as_func = None
 
-        model = await self._get_llm_model(agent_builder.model_configs)
+        serverless_sandbox = StatelessPersistentSandbox()
+        code_sandbox_tools = await serverless_sandbox.code_sandbox_tools(
+            blacklist=[
+                'start_container',
+                'stop_container',
+                'restart_container',
+                'get_container_info',
+                'get_all_containers',
+                'cleanup_containers'
+            ],
+            mcp_servers=serialized_servers
+        )
+        if not tools:
+            tools = []
+
+        tools.extend(code_sandbox_tools)
+
         base_agent = Agent(name=self.agent_name,
-                           model=model,
+                           model=self._get_llm_model(agent_builder.model_configs),
+                           tools=code_sandbox_tools if tools is None else code_sandbox_tools + tools,
                            system_prompt=self.system_prompt,
                            instructions=self.instructions(tools_as_func=tools_as_func),
                            event_stream_handler=event_stream_handler,
                            deps_type=self.deps_type,
                            output_type=self.output_type
                            )
-
-        serverless_sandbox = StatelessPersistentSandbox()
-        instrumented_agent = await serverless_sandbox.instrument_agent(agent=base_agent,
-                                                                       blacklist=[
-                                                                           'start_container',
-                                                                           'stop_container',
-                                                                           'restart_container',
-                                                                           'get_container_info',
-                                                                           'get_all_containers',
-                                                                           'cleanup_containers'
-                                                                       ],
-                                                                       mcp_servers=serialized_servers
-                                                                       )
-        return instrumented_agent
+        return base_agent
 
     @classmethod
     async def from_agent_confs(cls, agent_builder: AgentBuilder,
