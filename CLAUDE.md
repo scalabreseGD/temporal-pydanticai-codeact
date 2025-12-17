@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 This is a Python library named **temporal.pydanticai.codeact**, a reusable package for building agents with code execution capabilities using:
-- **PydanticAI** (v1.27.0) - Anthropic's agent framework for building production-grade GenAI applications
+- **PydanticAI** (v1.27.0) - Agent framework for building production-grade GenAI applications
 - **Temporal** (v1.19.0) - Workflow orchestration for reliable, long-running processes
 - **Docker Python Client** (v7.1.0) - Programmatic Docker container management
 

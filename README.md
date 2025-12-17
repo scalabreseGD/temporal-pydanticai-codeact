@@ -9,7 +9,7 @@ A reusable library for building intelligent agents with safe code execution capa
 
 **temporal.pydanticai.codeact** is a Python library that combines three powerful technologies to create AI agents that can write and execute code safely in isolated environments with persistent state:
 
-- **[PydanticAI](https://ai.pydantic.dev/)** (v1.27.0+) - Type-safe agent framework from Anthropic for building production-grade GenAI applications
+- **[PydanticAI](https://ai.pydantic.dev/)** (v1.27.0+) - Type-safe agent framework for building production-grade GenAI applications
 - **[Temporal](https://temporal.io/)** (v1.19.0+) - Workflow orchestration for reliable, durable, long-running agent processes
 - **[Docker](https://www.docker.com/)** - Containerized execution environment for secure code isolation
 
@@ -1277,7 +1277,7 @@ MIT
 ## Acknowledgments
 
 Built with:
-- [PydanticAI](https://ai.pydantic.dev/) by Anthropic
+- [PydanticAI](https://ai.pydantic.dev/)
 - [Temporal](https://temporal.io/)
 - [Docker](https://www.docker.com/)
 - [uv](https://github.com/astral-sh/uv) package manager
